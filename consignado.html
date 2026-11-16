@@ -166,10 +166,10 @@ body:not(.admin) main>*, body:not(.admin) .stepper{max-width:720px}
 pre{background:#f5f8fa;border:1px solid var(--borda);border-radius:8px;padding:8px;overflow:auto;font-size:11px;margin:4px 0 0;max-height:220px}
 /* Status da proposta (vocabulario da spec) — cor por desfecho. */
 .cab-card{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
-.tag.st-SIMULATED,.tag.st-STARTED{background:#eaf4fa;color:var(--azul)}
-.tag.st-AWAITING_CUSTOMER_DATA,.tag.st-UNDER_REVIEW{background:#fdf1dc;color:#8a5a00}
-.tag.st-SUBMITTED,.tag.st-APPROVED,.tag.st-DISBURSED,.tag.st-INTEGRATED{background:#e4f5ea;color:#1b7a3e}
-.tag.st-REJECTED,.tag.st-ERROR,.tag.st-INELIGIBLE{background:#fdecee;color:#8d2531}
+.tag.st-NOT_SUBMITTED{background:#eaf4fa;color:var(--azul)}
+.tag.st-UNDER_REVIEW{background:#fdf1dc;color:#8a5a00}
+.tag.st-APPROVED{background:#e4f5ea;color:#1b7a3e}
+.tag.st-REJECTED,.tag.st-ERROR{background:#fdecee;color:#8d2531}
 .tag.st-CANCELLED{background:#eceff2;color:var(--hint)}
 .badge{background:var(--coral);color:#fff;border-radius:99px;padding:0 6px;margin-left:4px;font-size:11px}
 code{font-size:12px}
@@ -398,8 +398,8 @@ function newScreen() {
   return () => g === generation
 }
 
-// Em analise sem condicao escolhida e a simulacao em retry: nada foi enviado ainda.
-const wasSent = (p) => !!p && (['SUBMITTED', 'APPROVED', 'DISBURSED', 'INTEGRATED'].includes(p.status) || (['REJECTED', 'CANCELLED'].includes(p.status) && !!p.proposalNumber) || (p.status === 'UNDER_REVIEW' && !!p.selectedOfferId))
+// Em analise ou aprovada ja foi enviada; encerrada so se chegou a Funcao (tem numero).
+const wasSent = (p) => !!p && (['UNDER_REVIEW', 'APPROVED'].includes(p.status) || (p.step === 'FINISHED' && !!p.proposalNumber))
 
 function paintStepper() {
   // Confirmacao sem envio (inelegivel, recusada, cancelada…): Oferta, Dados e Envio nao aconteceram.
@@ -445,7 +445,7 @@ async function withButton(btn, busyLabel, fn) {
 /** Situação na esteira da Função (GET da proposta). `null` = sem número ou Função fora do ar. */
 const PIPELINE_STATUS_LABEL = {
   IN_PROGRESS: 'Em andamento', APPROVED: 'Aprovada', PENDING: 'Pendente', REJECTED: 'Reprovada',
-  DISBURSED: 'Liberada', INTEGRATED: 'Integrada', CANCELLED: 'Cancelada', UNKNOWN: 'Situação não reconhecida',
+  RELEASED: 'Liberada', INTEGRATED: 'Integrada', CANCELLED: 'Cancelada', UNKNOWN: 'Situação não reconhecida',
 }
 /** Situação nas consultas de cadastro da Função (backoffice), como a API devolve. */
 const FUNCAO_ORIGIN_STATUS_LABEL = { ACTIVE: 'Ativo', INACTIVE: 'Inativo', UNKNOWN: 'Não reconhecida' }
@@ -469,11 +469,14 @@ function boxes(items) {
 
 // Status da proposta como a API devolve (Especificacao Tecnica, UC09) -> rotulo da tela.
 const STATUS_LABEL = {
-  STARTED: 'Iniciada', INELIGIBLE: 'Sem oferta', SIMULATED: 'Simulada',
-  AWAITING_CUSTOMER_DATA: 'Aguardando cadastro', UNDER_REVIEW: 'Em análise', SUBMITTED: 'Incluída',
+  NOT_SUBMITTED: 'Não enviada', UNDER_REVIEW: 'Em análise', APPROVED: 'Aprovada',
   REJECTED: 'Recusada', ERROR: 'Com erro', CANCELLED: 'Cancelada',
-  // So com a esteira da Funcao consultada (GET de uma proposta): a incluida mostra o desfecho dela.
-  APPROVED: 'Aprovada', DISBURSED: 'Liberada', INTEGRATED: 'Integrada',
+}
+
+// Onde a proposta esta ou parou (`step` da API), na ordem da jornada; FINISHED e o resultado.
+const JOURNEY_ORDER = ['OFFER', 'CUSTOMER_DATA', 'SUBMISSION', 'ANALYSIS', 'FINISHED']
+const JOURNEY_STEP_LABEL = {
+  OFFER: 'Oferta', CUSTOMER_DATA: 'Dados', SUBMISSION: 'Envio', ANALYSIS: 'Análise da instituição', FINISHED: 'Resultado',
 }
 
 /**
@@ -482,13 +485,17 @@ const STATUS_LABEL = {
  * diz qual foi, e a tela nao pode dizer.
  */
 const STATUS_MESSAGE = {
-  INELIGIBLE: 'Não há oferta disponível para o cliente informado.',
-  AWAITING_CUSTOMER_DATA: 'Complete seus dados para concluir a contratação.',
-  UNDER_REVIEW: 'Sua proposta está sendo processada. Acompanhe por aqui.',
+  NOT_SUBMITTED: 'Sua proposta ainda não foi enviada. Continue de onde parou.',
+  UNDER_REVIEW: 'Sua proposta está em análise. Acompanhe por aqui.',
+  APPROVED: 'Sua proposta foi aprovada pela instituição financeira.',
   REJECTED: 'A proposta não foi aprovada pela instituição financeira.',
   ERROR: 'Não foi possível concluir sua proposta agora. Nossa equipe foi avisada.',
   CANCELLED: 'Esta proposta foi cancelada.',
 }
+// Recusada sem chegar a Funcao (inelegivel, recusa na simulacao): a mesma frase neutra para todos.
+const statusMessage = (p) => (p.status === 'REJECTED' && !p.proposalNumber
+  ? 'Não há oferta disponível para o cliente informado.'
+  : STATUS_MESSAGE[p.status])
 
 // Etapas da saga (proposal_step), na ordem da jornada.
 const STEP_LABEL = {
@@ -506,7 +513,8 @@ const INTERNAL_STATUS_LABEL = {
   CREATED: 'Criada', INELIGIBLE: 'Inelegível',
   UNAVAILABLE: 'Indisponível (dado de referência)', ELIGIBLE: 'Elegível', SIMULATING: 'Simulando',
   SIMULATED: 'Simulada', CONDITION_SELECTED: 'Condição escolhida', READY_TO_SUBMIT: 'Pronta para envio',
-  SUBMITTING: 'Enviando à Função', PROPOSAL_CREATED: 'Incluída na Função', ERROR_RETRYABLE: 'Erro retentável',
+  SUBMITTING: 'Enviando à Função', PROPOSAL_CREATED: 'Incluída na Função', APPROVED: 'Aprovada na Função (INT)',
+  ERROR_RETRYABLE: 'Erro retentável',
   REJECTED: 'Recusada', CANCELLED: 'Cancelada', FAILED_PERMANENT: 'Falha definitiva (DLQ)',
 }
 
@@ -610,27 +618,25 @@ function agreementText(agreement, tenureYears) {
 }
 
 /**
- * Trilha da saga (UC01-UC08) para o colaborador, derivada so do que GET /proposals/:id devolve:
- * etapas antes da atual estao concluidas, a atual tem o status dela, as seguintes estao a seguir.
- * Incluida fecha tudo. Inelegivel nao tem trilha — mostrar ate onde chegou diria se o CPF esta na
- * base ou so tem pouco tempo de casa (RF-ELG-002/003).
+ * Trilha da jornada para o colaborador, so do `status` e do `step` da API: etapas antes da atual
+ * estao concluidas, a atual esta em curso (ou com falha, se deu erro), as seguintes estao a seguir.
+ * Encerrada sem chegar a Funcao (inelegivel, cancelada antes do envio) nao tem trilha — mostrar ate
+ * onde chegou diria se o CPF esta na base ou so tem pouco tempo de casa (RF-ELG-002/003).
  */
-const STEP_ORDER = ['ELIGIBILITY', 'AGREEMENT', 'SIMULATION', 'CUSTOMER_PF', 'CONSOLIDATION', 'INCLUSION']
-
-// Status em que a proposta parou sem incluir: as etapas seguintes nao vao acontecer, nao estao "a seguir".
-const STOPPED_WITHOUT_INCLUSION = ['CANCELLED', 'REJECTED', 'ERROR']
+// Resultado de cada desfecho no ultimo passo da trilha.
+const FINISHED_STATE = { APPROVED: 'concluida', REJECTED: 'falha', ERROR: 'falha', CANCELLED: 'neutra' }
 
 function journeySteps(p) {
-  if (!p || p.status === 'INELIGIBLE') return []
-  const current = p.currentStep
-  const idx = p.status === 'SUBMITTED' ? STEP_ORDER.length : current ? STEP_ORDER.indexOf(current.step) : -1
-  const afterState = STOPPED_WITHOUT_INCLUSION.includes(p.status) ? 'neutra' : 'pendente'
-  return STEP_ORDER.map((step, i) => ({
+  if (!p || (p.step === 'FINISHED' && !wasSent(p))) return []
+  const idx = JOURNEY_ORDER.indexOf(p.step)
+  // Erro parado numa etapa: as seguintes nao vao acontecer sozinhas, nao estao "a seguir".
+  const after = p.status === 'ERROR' ? 'neutra' : 'pendente'
+  return JOURNEY_ORDER.map((step, i) => ({
     step,
     state: i < idx ? 'concluida'
-      : i > idx ? afterState
-      : current.status === 'SUCCEEDED' ? 'concluida'
-      : current.status === 'FAILED' ? 'falha'
+      : i > idx ? after
+      : p.step === 'FINISHED' ? FINISHED_STATE[p.status] || 'concluida'
+      : p.status === 'ERROR' ? 'falha'
       : 'atual',
   }))
 }
@@ -639,7 +645,7 @@ function paintTrail(p) {
   const steps = journeySteps(p)
   return steps.length
     ? '<h2>Onde está sua proposta</h2><ol class="trilha" id="trilha">' + steps.map((e) =>
-      '<li class="' + e.state + '" data-etapa="' + e.step + '">' + esc(STEP_LABEL[e.step]) + '</li>').join('') + '</ol>'
+      '<li class="' + e.state + '" data-etapa="' + e.step + '">' + esc(JOURNEY_STEP_LABEL[e.step]) + '</li>').join('') + '</ol>'
     : ''
 }
 
@@ -649,10 +655,11 @@ function paintTrail(p) {
  */
 const canResume = (p) => p.status === 'ERROR' && !!p.canRetry && !!p.selectedOfferId
 
-// READY_TO_SUBMIT aparece como 'SIMULATED': o que separa Oferta de Envio e a condicao escolhida.
+// Etapa do assistente pela `step` da API. Nao enviada sem oferta ainda (simulando, retry da
+// simulacao) espera no acompanhamento, que se atualiza sozinho.
+const WIZARD_BY_STEP = { OFFER: 2, CUSTOMER_DATA: 3, SUBMISSION: 4 }
 const stepFor = (p) =>
-  p.status === 'SIMULATED' ? (p.selectedOfferId ? 4 : 2)
-    : p.status === 'AWAITING_CUSTOMER_DATA' ? 3
+  p.status === 'NOT_SUBMITTED' && (p.step !== 'OFFER' || (p.offers || []).length) ? WIZARD_BY_STEP[p.step]
     : canResume(p) ? 4
     : 5
 
@@ -751,7 +758,7 @@ function cpfScreen(isCurrent) {
             '<div class="box" style="margin-bottom:8px"><div class="cab-card">' +
               '<div class="val">' + (p.proposalNumber ? 'Proposta nº ' + esc(p.proposalNumber) : 'Proposta de ' + esc(formatDateTime(p.createdAt))) +
                 '<span class="sub">ID de acompanhamento ' + esc(p.proposalId) + '</span>' +
-                '<span class="sub">Atualizada em ' + esc(formatDateTime(p.updatedAt)) + (STATUS_MESSAGE[p.status] ? ' · ' + esc(STATUS_MESSAGE[p.status]) : '') + '</span></div>' +
+                '<span class="sub">Atualizada em ' + esc(formatDateTime(p.updatedAt)) + (statusMessage(p) ? ' · ' + esc(statusMessage(p)) : '') + '</span></div>' +
               tagStatus(p.status) +
             '</div><button class="alterar" data-acompanhar="' + esc(p.proposalId) + '">Ver andamento</button></div>').join('')
         : '<div style="height:14px"></div><p class="hint">Nenhuma proposta encontrada para este CPF.</p>'
@@ -1236,9 +1243,8 @@ let pollStatus = null
 const nextPollDelay = (n) => (n < 10 ? 3000 : n < 30 ? 15000 : null)
 
 /**
- * UC09 na visao do colaborador. "Em analise" e "iniciada" se atualizam sozinhos (com backoff); os
- * demais status sao finais, entao param o polling. Incluida mantem o Atualizar: a esteira da Funcao
- * segue mudando depois da inclusao.
+ * UC09 na visao do colaborador. Enquanto nao chega ao resultado (`step` FINISHED) a tela se atualiza
+ * sozinha (com backoff) e mantem o Atualizar: na analise, quem muda o status e a Funcao.
  */
 function trackingScreen(isCurrent) {
   clearTimeout(pollTimer)
@@ -1246,27 +1252,25 @@ function trackingScreen(isCurrent) {
   if (!p) return restart()
   if (p.status !== pollStatus) { pollCount = 0; pollStatus = p.status }
 
-  const isFinal = ['SUBMITTED', 'INELIGIBLE', 'REJECTED', 'ERROR', 'CANCELLED'].includes(p.status)
+  const isFinal = p.step === 'FINISHED'
   const delay = isFinal ? null : nextPollDelay(pollCount)
   const sent = wasSent(p)
-  const step = p.currentStep
+  const message = statusMessage(p)
   app.innerHTML =
     '<div class="card" id="acompanhamento">' +
       '<div class="cab-card"><h1>' + (sent ? 'Proposta enviada' : 'Acompanhe sua proposta') + '</h1>' + tagStatus(p.status) + '</div>' +
-      (STATUS_MESSAGE[p.status] ? '<div class="aviso ' + (['ERROR', 'REJECTED', 'INELIGIBLE'].includes(p.status) ? 'erro' : 'info') + '" id="mensagem">' + esc(STATUS_MESSAGE[p.status]) + '</div>' : '') +
+      (message ? '<div class="aviso ' + (['ERROR', 'REJECTED'].includes(p.status) ? 'erro' : 'info') + '" id="mensagem">' + esc(message) + '</div>' : '') +
       boxes([
         // O "Acompanhar" nao lista inelegivel: o ID nao serviria para nada.
-        ...(p.status === 'INELIGIBLE' ? [] : [{ label: 'ID de acompanhamento', value: p.proposalId, highlight: true, sub: 'Use em "Acompanhar minhas propostas" ou ao falar com o RH.' }]),
+        ...(p.status === 'REJECTED' && !p.employee ? [] : [{ label: 'ID de acompanhamento', value: p.proposalId, highlight: true, sub: 'Use em "Acompanhar minhas propostas" ou ao falar com o RH.' }]),
         ...(p.proposalNumber ? [{ label: 'Número da proposta na Função', value: p.proposalNumber }] : []),
       ]) +
-      pipelineBox(p.pipeline) +
       paintTrail(p) +
-      (step ? boxes([{ label: 'Etapa atual', value: (STEP_LABEL[step.step] || step.step) + ' — ' + (STEP_STATUS_LABEL[step.status] || step.status) }]) : '') +
       (p.retryScheduledAt ? '<p class="hint">Tentaremos de novo automaticamente às ' + esc(new Date(p.retryScheduledAt).toLocaleTimeString('pt-BR')) + '. Você não precisa refazer nada.</p>' : '') +
       (sent ? '<div class="aviso info">O envio não significa que o crédito foi aprovado. A análise e a decisão são da instituição financeira.</div>' : '') +
       (!isFinal && delay === null ? '<p class="hint" id="poll-parado">Atualização automática pausada. Toque em Atualizar para ver o status.</p>' : '') +
       alertBox('erro-acomp', takeNotice()) +
-      (isFinal && p.status !== 'SUBMITTED' ? '' : '<button class="acao sec" id="btn-atualizar">Atualizar</button><div style="height:10px"></div>') +
+      (isFinal ? '' : '<button class="acao sec" id="btn-atualizar">Atualizar</button><div style="height:10px"></div>') +
       '<button class="acao" id="btn-nova">Nova consulta</button>' +
     '</div>'
 
@@ -1655,7 +1659,7 @@ const awaitsReconciliation = (h) => h.internalStatus === 'SUBMITTING' &&
 function supportNote(h) {
   if (awaitsReconciliation(h)) return 'Desfecho desconhecido: o envio não teve resposta. O serviço procura a proposta na Função a cada minuto — achou, vira incluída; sem sinal dela em 30 minutos, volta ao colaborador para reenviar.'
   if (h.internalStatus === 'FAILED_PERMANENT') return 'DLQ: não há reprocessamento. A matrícula já está livre — uma nova simulação pelo CPF abre outra proposta.'
-  if (h.internalStatus === 'ERROR_RETRYABLE') return h.status === 'UNDER_REVIEW'
+  if (h.internalStatus === 'ERROR_RETRYABLE') return (h.retries || []).some((r) => !r.processedAt && !r.deadAt)
     ? 'Retry agendado no outbox: o worker reprocessa sozinho.'
     : 'Falha sem retry agendado: o colaborador tenta de novo ou cancela pela tela dele.'
   if (h.internalStatus === 'UNAVAILABLE') return 'Indisponível por dado de referência: confira se há lote de vínculos vigente (Developer › Lotes; a planilha chega pela caixa de entrada do bucket) ou se a filial está cadastrada (aba Configurações); a proposta volta a andar quando o colaborador refizer a simulação pelo CPF.'
@@ -2101,7 +2105,7 @@ function selftest() {
   check('pep "sim" é true', buildSupplementPayload({ pep: 'sim' }), { pep: true })
   check('message em lista vira frase', errorMessage({ message: ['a', 'b'] }, 400), 'a b')
   check('esteira ausente não desenha nada', pipelineBox(null), '')
-  check('esteira traduz a situação', /Liberada — Tela de confirmação/.test(pipelineBox({ status: 'DISBURSED', activityDescription: 'Tela de confirmação', reasons: [] })), true)
+  check('esteira traduz a situação', /Liberada — Tela de confirmação/.test(pipelineBox({ status: 'RELEASED', activityDescription: 'Tela de confirmação', reasons: [] })), true)
   check('problem+json usa o title', errorMessage({ title: 'Proposta não encontrada.', status: 404 }, 404), 'Proposta não encontrada.')
   check('erro do Zod mostra o motivo, não "Validation failed"',
     errorMessage({ statusCode: 400, message: 'Validation failed', errors: [{ message: 'Informe exatamente um dos dois.' }] }, 400),
@@ -2114,8 +2118,10 @@ function selftest() {
   check('faixa aberta vira "ou mais"',
     agreementText({ code: '003034', tenureMinYears: 7, tenureMaxYears: null }, 9),
     'Convênio 003034 — 7 anos de casa ou mais (você tem 9 anos)')
-  check('status da spec tem rótulo', STATUS_LABEL.AWAITING_CUSTOMER_DATA, 'Aguardando cadastro')
-  check('mensagem sai do status, não da API', [STATUS_MESSAGE.INELIGIBLE, STATUS_MESSAGE.SUBMITTED], ['Não há oferta disponível para o cliente informado.', undefined])
+  check('status tem rótulo', [STATUS_LABEL.NOT_SUBMITTED, JOURNEY_STEP_LABEL.ANALYSIS], ['Não enviada', 'Análise da instituição'])
+  check('recusada sem chegar à Função usa a frase neutra (RF-ELG-002/003)',
+    [statusMessage({ status: 'REJECTED' }), statusMessage({ status: 'REJECTED', proposalNumber: '1' })],
+    ['Não há oferta disponível para o cliente informado.', 'A proposta não foi aprovada pela instituição financeira.'])
   check('estado interno traduzido, código junto', labelCodeText(INTERNAL_STATUS_LABEL, 'ERROR_RETRYABLE'), 'Erro retentável · ERROR_RETRYABLE')
   check('motivo com detalhe usa o prefixo', labelOf(REASON_LABEL, 'FUNCAO_UNAVAILABLE: inclusao http=503'), 'Função indisponível')
   check('código sem rótulo aparece cru', [reasonLabel('NOVO_CODIGO'), reasonLabel(null)], ['NOVO_CODIGO', '—'])
@@ -2132,16 +2138,16 @@ function selftest() {
     'pageSize=50&step=SIMULATION&from=2026-10-01')
 
   const states = (p) => journeySteps(p).map((e) => e.state)
-  check('trilha: simulada fecha elegibilidade, convênio e simulação',
-    states({ status: 'SIMULATED', currentStep: { step: 'SIMULATION', status: 'SUCCEEDED' } }),
-    ['concluida', 'concluida', 'concluida', 'pendente', 'pendente', 'pendente'])
-  check('trilha: etapa em retry fica "atual"',
-    states({ status: 'UNDER_REVIEW', currentStep: { step: 'INCLUSION', status: 'PENDING' } }),
-    ['concluida', 'concluida', 'concluida', 'concluida', 'concluida', 'atual'])
-  check('trilha: falha marca a etapa', states({ status: 'ERROR', currentStep: { step: 'SIMULATION', status: 'FAILED' } })[2], 'falha')
-  check('trilha: incluída fecha tudo', states({ status: 'SUBMITTED', currentStep: null }).every((e) => e === 'concluida'), true)
+  check('trilha: dados em curso',
+    states({ status: 'NOT_SUBMITTED', step: 'CUSTOMER_DATA' }), ['concluida', 'atual', 'pendente', 'pendente', 'pendente'])
+  check('trilha: na Função',
+    states({ status: 'UNDER_REVIEW', step: 'ANALYSIS', proposalNumber: '1' }), ['concluida', 'concluida', 'concluida', 'atual', 'pendente'])
+  check('trilha: recusa do envio marca o envio, o resto não vem sozinho',
+    states({ status: 'ERROR', step: 'SUBMISSION' }), ['concluida', 'concluida', 'falha', 'neutra', 'neutra'])
+  check('trilha: aprovada fecha tudo', states({ status: 'APPROVED', step: 'FINISHED', proposalNumber: '1' }).every((e) => e === 'concluida'), true)
+  check('trilha: reprovada pela Função', states({ status: 'REJECTED', step: 'FINISHED', proposalNumber: '1' })[4], 'falha')
   check('trilha: inelegível não mostra até onde chegou (RF-ELG-002/003)',
-    journeySteps({ status: 'INELIGIBLE', currentStep: { step: 'AGREEMENT', status: 'FAILED' } }), [])
+    journeySteps({ status: 'REJECTED', step: 'FINISHED', proposalNumber: null }), [])
 
   const f = queuesSummary([
     { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: '2026-10-01T10:05:00Z', dlq: null },
@@ -2152,13 +2158,13 @@ function selftest() {
   check('filas: retry em ordem de execução', f.retry.map((p) => p.retryScheduledAt), ['2026-10-01T10:01:00Z', '2026-10-01T10:05:00Z'])
   check('filas: contagens', [f.submitting.length, f.awaitingData.length, f.dlq.length, f.byInternalStatus[0]], [1, 0, 1, ['ERROR_RETRYABLE', 2]])
 
-  const historyView = (internalStatus, steps, status) => ({ internalStatus, status, steps: steps || [] })
+  const historyView = (internalStatus, steps, retries) => ({ internalStatus, steps: steps || [], retries: retries || [] })
   check('desfecho desconhecido reconhecido pela etapa',
     awaitsReconciliation(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }])), true)
   check('inclusão em curso não é desfecho desconhecido',
     awaitsReconciliation(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: null }])), false)
   check('DLQ orienta nova simulação, não reprocesso', /nova simulação/.test(supportNote(historyView('FAILED_PERMANENT'))), true)
-  check('retry agendado: o worker reprocessa sozinho', /sozinho/.test(supportNote(historyView('ERROR_RETRYABLE', [], 'UNDER_REVIEW'))), true)
+  check('retry agendado: o worker reprocessa sozinho', /sozinho/.test(supportNote(historyView('ERROR_RETRYABLE', [], [{ processedAt: null, deadAt: null }]))), true)
   check('desfecho desconhecido: o serviço resolve sozinho', /Função a cada minuto/.test(supportNote(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }]))), true)
 
   const currentBatches = currentByDataset([
@@ -2172,15 +2178,16 @@ function selftest() {
   check('health fica fora do /api', serviceRoot('http://localhost:3010/api/'), 'http://localhost:3010')
 
   // Revisão do Reviewr (B1–B9, S1–S7)
-  check('roteamento por status e condição escolhida', [
-    { status: 'SIMULATED', selectedOfferId: null },
-    { status: 'AWAITING_CUSTOMER_DATA', selectedOfferId: 'c' },
-    { status: 'SIMULATED', selectedOfferId: 'c' },
-    { status: 'ERROR', selectedOfferId: 'c', canRetry: true },
-    { status: 'ERROR', selectedOfferId: 'c', canRetry: false },
-    { status: 'UNDER_REVIEW', selectedOfferId: 'c' },
-    { status: 'INELIGIBLE', selectedOfferId: null },
-  ].map(stepFor), [2, 3, 4, 4, 5, 5, 5])
+  check('roteamento pelo step da API', [
+    { status: 'NOT_SUBMITTED', step: 'OFFER', offers: [{}] },
+    { status: 'NOT_SUBMITTED', step: 'CUSTOMER_DATA', selectedOfferId: 'c' },
+    { status: 'NOT_SUBMITTED', step: 'SUBMISSION', selectedOfferId: 'c' },
+    { status: 'ERROR', step: 'SUBMISSION', selectedOfferId: 'c', canRetry: true },
+    { status: 'ERROR', step: 'FINISHED', selectedOfferId: 'c', canRetry: false },
+    { status: 'UNDER_REVIEW', step: 'ANALYSIS', selectedOfferId: 'c' },
+    { status: 'REJECTED', step: 'FINISHED', selectedOfferId: null },
+    { status: 'NOT_SUBMITTED', step: 'OFFER', offers: [] },
+  ].map(stepFor), [2, 3, 4, 4, 5, 5, 5, 5])
   check('B1: recusa da inclusão (canRetry) volta ao envio', canResume({ status: 'ERROR', selectedOfferId: 'c', canRetry: true }), true)
   check('B1: erro sem condição (simulação) não oferece', canResume({ status: 'ERROR', selectedOfferId: null, canRetry: true }), false)
   check('B1: DLQ (sem canRetry) não oferece', canResume({ status: 'ERROR', selectedOfferId: 'c', canRetry: false }), false)
@@ -2206,9 +2213,9 @@ function selftest() {
     { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: null, dlq: null },
     { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: 'x', dlq: null },
   ]).stalled.length, 1)
-  check('S5: cancelada não deixa etapas "a seguir"',
-    states({ status: 'CANCELLED', currentStep: { step: 'SIMULATION', status: 'SUCCEEDED' } }),
-    ['concluida', 'concluida', 'concluida', 'neutra', 'neutra', 'neutra'])
+  check('S5: cancelada pela Função encerra neutra; antes do envio, sem trilha',
+    [states({ status: 'CANCELLED', step: 'FINISHED', proposalNumber: '1' })[4], states({ status: 'CANCELLED', step: 'FINISHED' }).length],
+    ['neutra', 0])
 
   const t1 = newScreen()
   const t2 = newScreen()
