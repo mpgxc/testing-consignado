@@ -1,0 +1,2272 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Consignado Privado — proposta</title>
+<!--
+  Proposta consignada (Especificacao Tecnica "Integracao Proposta Consignado") em arquivo unico,
+  sem build e sem dependencia, falando direto com a API do buni.ms.loans (prefixo /api). Tres
+  visoes: colaborador (/ ou #colaborador), backoffice (/admin/ ou #admin) e developer (/dev/ ou
+  #dev: filas, DLQ e lotes), trocadas pelo switch do cabecalho sem recarregar a pagina.
+
+  Como abrir: sirva a pasta por HTTP (o CORS da API vem de CORS_ORIGINS, default `*`):
+
+      cd buni.ms.loans && python3 -m http.server 5179
+      # http://localhost:5179/consignado.html
+
+  A base da API fica no campo do rodape (default http://localhost:3010/api), gravada em
+  localStorage. De outra maquina (ngrok): exponha a API (`ngrok http 3010`) e a pasta estatica, e
+  troque o campo para https://<tunel-da-api>/api. Upload de planilha nao funciona assim: a URL
+  pre-assinada aponta para S3_ENDPOINT (localhost:4570). Auto-check: abra consignado.html#selftest.
+-->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --azul:#02527e; --azul-escuro:#00263b; --azul-claro:#5084a9; --coral:#c63646;
+  --borda:#d7e0e8; --hint:#5b7183;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#eef2f6;color:var(--azul-escuro);font:15px/1.5 "Figtree",system-ui,-apple-system,"Segoe UI",sans-serif}
+body.admin{background:#e9edf0}
+/* Cada sistema tem a sua cor de cabecalho: quem opera o backoffice precisa saber, sem ler, que
+   nao esta na tela do colaborador. A troca e o unico movimento da pagina — o overlay esmaece. */
+header{position:relative;isolation:isolate;background:linear-gradient(120deg,var(--azul-escuro),var(--azul) 60%,var(--azul-claro));padding:18px 16px 20px}
+header::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(120deg,#0d1b24,#1d3a47 55%,#2c5d62);opacity:0;transition:opacity .35s ease}
+body.admin header::before{opacity:1}
+.wrap{max-width:1180px;margin:0 auto}
+.marca{color:#fff;font-size:18px;font-weight:800;letter-spacing:-.3px;line-height:1.15}
+.marca small{display:block;font-size:12px;font-weight:500;letter-spacing:0;color:rgba(255,255,255,.72)}
+.voltar{background:none;border:0;color:rgba(255,255,255,.9);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:0 8px 0 0}
+.topo{display:flex;align-items:center;gap:10px 12px;margin-bottom:16px;flex-wrap:wrap}
+.switch{position:relative;margin-left:auto;display:grid;grid-template-columns:1fr 1fr 1fr;padding:4px;border-radius:14px;background:rgba(0,0,0,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+.switch::before{content:"";position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / 3);border-radius:10px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:transform .3s cubic-bezier(.3,.7,.2,1)}
+body.admin .switch::before{transform:translateX(100%)}
+body.dev .switch::before{transform:translateX(200%)}
+/* Developer e o portal (mesmos estilos de body.admin) com cabecalho proprio: fila, DLQ e lote sao
+   bastidor, nao operacao — quem esta ali precisa ver que saiu do backoffice. */
+body.dev header::before{background:linear-gradient(120deg,#17141f,#2f2945 55%,#4a3f66)}
+body.dev .switch button[aria-selected="true"]{color:#2f2945}
+.switch button{position:relative;z-index:1;border:0;background:none;cursor:pointer;font:inherit;text-align:left;padding:7px 14px;border-radius:10px;color:rgba(255,255,255,.82);font-size:13px;font-weight:700;line-height:1.2;transition:color .3s}
+.switch button small{display:block;font-size:11px;font-weight:500;opacity:.75}
+.switch button[aria-selected="true"]{color:var(--azul)}
+body.admin .switch button[aria-selected="true"]{color:#1d3a47}
+.switch button:focus-visible,.aba:focus-visible,button.acao:focus-visible{outline:2px solid #ffd27a;outline-offset:2px}
+@media (max-width:520px){.switch{margin-left:0;width:100%}}
+@media (prefers-reduced-motion:reduce){header::before,.switch::before,.switch button{transition:none}}
+.stepper{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-height:42px}
+.step{flex:1;color:rgba(255,255,255,.6);font-size:11px;font-weight:700;text-align:center}
+.step .dot{display:block;margin:0 auto 4px;width:22px;height:22px;line-height:22px;border-radius:50%;background:rgba(255,255,255,.18)}
+.step.active{color:#fff}.step.active .dot{background:#fff;color:var(--azul)}
+.step.done .dot{background:rgba(255,255,255,.75);color:var(--azul)}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+.card{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,38,59,.12);padding:22px;margin-bottom:16px}
+h1{font-size:19px;margin:0 0 4px}
+h2{font-size:14px;color:var(--azul);margin:0 0 10px}
+.hint{color:var(--hint);font-size:13px;margin:0 0 16px}
+.box{background:#f5f8fa;border:1px solid var(--borda);border-radius:10px;padding:12px}
+.box .rot{color:var(--hint);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.box .val{font-weight:700;font-size:15px;margin-top:2px;overflow-wrap:anywhere}
+.box.destaque .val{color:var(--azul);font-size:18px}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr));margin-bottom:14px}
+.grid.form{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px}
+label{display:block;font-size:12px;font-weight:700;margin-bottom:4px}
+label .req{color:var(--coral)}
+input,select{width:100%;padding:9px 11px;border:1px solid var(--borda);border-radius:8px;font:inherit;background:#fff;color:inherit}
+input:focus,select:focus{outline:0;border-color:var(--azul);box-shadow:0 0 0 3px rgba(2,82,126,.12)}
+button.acao{width:100%;padding:12px;border:0;border-radius:10px;background:var(--azul);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+button.acao:disabled{opacity:.55;cursor:default}
+button.acao.sec{background:#fff;color:var(--azul);border:1px solid var(--azul)}
+button.acao.coral{background:var(--coral)}
+.linha{display:flex;gap:10px;flex-wrap:wrap}.linha>*{flex:1;min-width:180px}
+.aviso{border-radius:10px;padding:11px 13px;font-size:13px;margin-bottom:14px}
+.aviso.info{background:#eaf4fa;border:1px solid #bcd9e9;color:var(--azul-escuro)}
+.aviso.erro{background:#fdecee;border:1px solid #f3c2c8;color:#8d2531}
+.opcao{display:flex;justify-content:space-between;width:100%;margin-bottom:8px}
+.prazo{display:flex;align-items:center;gap:8px;margin:0;font-size:14px;cursor:pointer}.prazo input{width:auto;margin:0}
+fieldset{border:0;padding:0;margin:0 0 22px}
+legend{font-size:14px;font-weight:700;color:var(--azul);margin-bottom:10px}
+.editavel{grid-column:1/-1}
+.editavel .cab{display:flex;justify-content:space-between;align-items:start;gap:8px}
+.alterar{background:none;border:0;color:var(--azul);font:inherit;font-size:12px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
+.oculto{display:none}
+.tbl input.invalido,.tbl select.invalido{border-color:var(--coral);box-shadow:0 0 0 3px rgba(232,93,80,.15)}
+.tbl td input,.tbl td select{min-width:130px;padding:6px 8px}
+/* Configuracao da API no cabecalho, entre a marca e o switch: e o primeiro suspeito quando uma tela
+   nao carrega, entao fica a vista sem rolar. O detalhe do health vai no title do status. */
+.api-cfg{display:flex;align-items:center;gap:8px;flex:1;min-width:0;max-width:520px;margin-left:auto;font-size:12px;color:rgba(255,255,255,.72)}
+.api-cfg label{margin:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.api-cfg input{flex:1;min-width:140px;padding:5px 9px;font-size:12px;background:rgba(0,0,0,.22);border-color:rgba(255,255,255,.18);color:#fff}
+.api-cfg input:focus{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.18)}
+.api-cfg .saude{white-space:nowrap}
+.api-cfg .ok{color:#8fe3ad}.api-cfg .fail{color:#ffaaa1}
+.api-cfg+.switch{margin-left:0}
+/* Celular: cabecalho enxuto (o switch perde o subtitulo, o stepper so rotula a etapa atual), card
+   com menos respiro lateral, box de destaque ocupando a linha e input a 16px — abaixo disso o
+   Safari do iPhone da zoom no foco e a tela "pula". */
+@media (max-width:520px){
+  header{padding:12px 12px 14px}
+  .topo{margin-bottom:10px}
+  .switch button{padding:6px 10px}
+  .switch button small{display:none}
+  .step{font-size:10px}
+  .step:not(.active) .lbl{display:none}
+  main{padding:14px 12px 32px}
+  .card{padding:16px;border-radius:12px;margin-bottom:12px}
+  .rolagem{margin:0 -16px;padding:0 16px}
+  h1{font-size:18px}
+  .box.destaque,.box.largo{grid-column:1/-1}
+  .grid.form{grid-template-columns:1fr 1fr;gap:12px}
+  .grid.form>*{grid-column:1/-1}
+  .grid.form>.curto{grid-column:auto}
+  .box{padding:10px}
+  input,select{font-size:16px;padding:10px 11px}
+  button.acao{padding:13px}
+}
+@media (max-width:860px){.api-cfg{order:3;flex-basis:100%;max-width:none;margin-left:0}.api-cfg+.switch{margin-left:auto}}
+.ok{color:#1b7a3e}.fail{color:var(--coral)}
+.aba{background:rgba(255,255,255,.16);border:0;color:rgba(255,255,255,.8);font:inherit;font-weight:700;font-size:13px;padding:8px 14px;border-radius:8px;cursor:pointer}
+.aba.ativa{background:#fff;color:#1d3a47}
+body.admin h2,body.admin .box.destaque .val{color:#2c5d62}
+body.admin button.acao{background:#1d3a47}
+body.admin button.acao.sec{background:#fff;color:#1d3a47;border-color:#1d3a47}
+body.admin button.acao.coral{background:var(--coral)}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th,.tbl td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--borda);vertical-align:top}
+.tbl th{color:var(--hint);font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:700}
+.tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.PUBLISHED{background:#e4f5ea;color:#1b7a3e}
+.tag.PROCESSING{background:#fdf1dc;color:#8a5a00}
+.tag.SUPERSEDED{background:#eceff2;color:var(--hint)}
+.tag.REJECTED{background:#fdecee;color:#8d2531}
+.rolagem{overflow-x:auto;margin:0 -22px;padding:0 22px}
+/* Cabecalho, conteudo e rodape tem a mesma largura nos dois sistemas: a marca e o switch nao
+   pulam de lugar na troca. O portal e tabela e usa a largura toda; a jornada do colaborador e
+   formulario e fica numa coluna de 720px alinhada a esquerda — la a linha curta ajuda a leitura. */
+body:not(.admin) main>*, body:not(.admin) .stepper{max-width:720px}
+.tbl th,.tbl td{white-space:nowrap}
+.tbl td.quebra{white-space:normal;min-width:150px;overflow-wrap:anywhere}
+.tbl .sub,.box .sub{display:block;color:var(--hint);font-size:11px;font-weight:400}
+/* Lista de propostas: quebra em vez de rolar; abaixo de 760px cada linha vira cartao
+   ([colaborador | status], detalhe, [proposta | historico]). */
+.tbl.lista th,.tbl.lista td{white-space:normal;overflow-wrap:anywhere;padding:10px 8px}
+.tbl.lista td:last-child{text-align:right}
+.link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--azul);cursor:pointer;text-align:left}
+.link:hover{text-decoration:underline}
+@media (max-width:760px){
+  .tbl.lista thead{display:none}
+  .tbl.lista tr{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:12px 0;border-bottom:1px solid var(--borda)}
+  .tbl.lista td{padding:0;border:0}
+  .tbl.lista td:nth-child(2),.tbl.lista td:nth-child(5){text-align:right}
+  .tbl.lista td:nth-child(3){grid-column:1/-1}
+  .tbl.lista td:empty{display:none}
+}
+pre{background:#f5f8fa;border:1px solid var(--borda);border-radius:8px;padding:8px;overflow:auto;font-size:11px;margin:4px 0 0;max-height:220px}
+/* Status da proposta (vocabulario da spec) — cor por desfecho. */
+.cab-card{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.tag.st-SIMULATED,.tag.st-STARTED{background:#eaf4fa;color:var(--azul)}
+.tag.st-AWAITING_CUSTOMER_DATA,.tag.st-UNDER_REVIEW{background:#fdf1dc;color:#8a5a00}
+.tag.st-SUBMITTED,.tag.st-APPROVED,.tag.st-DISBURSED,.tag.st-INTEGRATED{background:#e4f5ea;color:#1b7a3e}
+.tag.st-REJECTED,.tag.st-ERROR,.tag.st-INELIGIBLE{background:#fdecee;color:#8d2531}
+.tag.st-CANCELLED{background:#eceff2;color:var(--hint)}
+.badge{background:var(--coral);color:#fff;border-radius:99px;padding:0 6px;margin-left:4px;font-size:11px}
+code{font-size:12px}
+/* Trilha da saga (UC01-UC08) na visao do colaborador: onde a proposta esta, sem motivo tecnico. */
+.trilha{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px;grid-template-columns:repeat(auto-fit,minmax(105px,1fr))}
+.trilha li{font-size:12px;font-weight:600;padding:7px 9px;border-radius:8px;background:#f5f8fa;border:1px solid var(--borda);color:var(--hint)}
+.trilha li::before{display:block;font-size:11px;font-weight:700}
+.trilha li.concluida{background:#e4f5ea;border-color:#bfe3cb;color:#1b7a3e}.trilha li.concluida::before{content:"✓ concluída"}
+.trilha li.atual{background:#eaf4fa;border-color:#bcd9e9;color:var(--azul)}.trilha li.atual::before{content:"● em andamento"}
+.trilha li.falha{background:#fdecee;border-color:#f3c2c8;color:#8d2531}.trilha li.falha::before{content:"✗ com falha"}
+.trilha li.pendente::before{content:"○ a seguir"}
+.trilha li.neutra{opacity:.55}.trilha li.neutra::before{content:"– não realizada"}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="topo">
+      <button class="voltar oculto" id="btn-voltar" aria-label="Voltar para a etapa anterior">&larr; Voltar</button>
+      <span class="marca" id="marca">Consignado Privado<small id="marca-sub">Crédito com desconto em folha</small></span>
+      <div class="api-cfg">
+        <label for="api-base">API</label>
+        <input id="api-base" spellcheck="false">
+        <span class="saude" id="saude"></span>
+      </div>
+      <div class="switch" role="tablist" aria-label="Sistema">
+        <button role="tab" id="app-jornada" data-modo="colaborador">Colaborador<small>Simular e acompanhar</small></button>
+        <button role="tab" id="app-portal" data-modo="admin">Backoffice<small>Propostas e funcionários</small></button>
+        <button role="tab" id="app-dev" data-modo="dev">Developer<small>Filas, DLQ, lotes e Função</small></button>
+      </div>
+    </div>
+    <div class="stepper" id="stepper"></div>
+  </div>
+</header>
+<main id="app"></main>
+<script>
+'use strict'
+
+/* ---------------------------------------------------------------- base HTTP */
+
+const API_KEY = 'buniApiBase'
+const apiInput = document.getElementById('api-base')
+apiInput.value = localStorage.getItem(API_KEY) || 'http://localhost:3010/api'
+apiInput.onchange = () => localStorage.setItem(API_KEY, apiInput.value.replace(/\/$/, ''))
+
+/**
+ * API exposta por ngrok (plano free): sem este header, o fetch do browser recebe a pagina HTML de
+ * aviso do ngrok no lugar do JSON. Fora do ngrok o header e ignorado (o CORS da API aceita).
+ */
+const NGROK = { 'ngrok-skip-browser-warning': '1' }
+
+/**
+ * A API nao usa envelope: sucesso e o proprio objeto, erro e um HTTP != 2xx em
+ * `application/problem+json` — `title` e a mensagem publica.
+ *
+ * Validacao (Zod) e um caso a parte: `title` e o generico "Revise os campos informados." e o motivo
+ * de verdade fica em `errors[].message`, sem o nome do campo — ele vem de `path[0]`.
+ */
+function errorMessage(body, status) {
+  if (body && Array.isArray(body.errors)) {
+    const details = body.errors.filter((e) => e && e.message)
+      .map((e) => (FIELD_LABEL[e.path && e.path[0]] ? FIELD_LABEL[e.path[0]] + ': ' : '') + e.message).join(' ')
+    if (details) return details
+  }
+  const m = body && (body.title || body.message)
+  if (Array.isArray(m)) return m.join(' ')
+  if (typeof m === 'string' && m) return body.detail ? m + ' ' + body.detail : m
+  return status >= 500 ? 'Serviço indisponível agora. Tente novamente.' : 'Não foi possível concluir a operação.'
+}
+
+async function api(method, path, body, headers) {
+  const base = apiInput.value.replace(/\/$/, '')
+  let res
+  try {
+    res = await fetch(base + path, {
+      method,
+      // Status da esteira vem da Funcao a cada GET: nunca servir resposta guardada pelo navegador.
+      cache: 'no-store',
+      headers: Object.assign({}, NGROK, body ? { 'Content-Type': 'application/json' } : null, headers),
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new Error('Erro de comunicação com a API. Verifique se o serviço está no ar.')
+  }
+  const text = await res.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch { /* resposta nao-JSON */ }
+  if (!res.ok) {
+    // `code` do problem+json: a tela decide pelo codigo, nunca pelo texto.
+    throw Object.assign(new Error(errorMessage(json, res.status)), { code: json && json.code })
+  }
+  return json
+}
+
+/** O health fica fora do prefixo `api` (main.ts): a raiz do servico e a base sem o `/api`. */
+const serviceRoot = (base) => String(base).replace(/\/$/, '').replace(/\/api$/, '')
+
+/** Cabecalho: a API esta no ar e o banco responde? E o primeiro suspeito quando uma tela nao carrega. */
+async function paintHealth() {
+  const el = document.getElementById('saude')
+  const root = serviceRoot(apiInput.value)
+  try {
+    const [ready, version] = await Promise.all([
+      fetch(root + '/health/ready', { headers: NGROK }).then((r) => r.json()),
+      fetch(root + '/health/version', { headers: NGROK }).then((r) => r.json()),
+    ])
+    const pg = ready.dependencies && ready.dependencies.postgres
+    el.title = version.service + ' ' + version.version + ' · Postgres ' + (pg || '?') +
+      ' · no ar desde ' + new Date(version.startedAt).toLocaleString('pt-BR')
+    el.innerHTML = '<span class="' + (ready.status === 'ok' ? 'ok' : 'fail') + '">● ' + esc(version.version) + '</span> · PG ' + esc(pg || '?')
+  } catch {
+    el.title = ''
+    el.innerHTML = '<span class="fail">● fora do ar</span>'
+  }
+}
+apiInput.addEventListener('change', paintHealth)
+
+/* ------------------------------------------------------------- formatadores */
+
+const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+/**
+ * Valor digitado pelo cliente vira number. A regra e uma so: se tem virgula, o texto e pt-BR e o
+ * ponto e separador de milhar ("1.250,50"); sem virgula, e numero cru ("1250.5"). Parsear so com
+ * `replace(',', '.')` transformava "1.250,50" em NaN — e o campo ia como 0 sem ninguem ver.
+ */
+function parseBrNumber(v) {
+  const s = String(v == null ? '' : v).trim()
+  return Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s) || 0
+}
+
+function formatDate(iso) {
+  if (!iso) return '—'
+  const m = String(iso).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : String(iso)
+}
+
+function formatPhone(phone) {
+  const d = String(phone || '').replace(/\D/g, '')
+  if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7)
+  if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6)
+  return phone || '—'
+}
+
+function formatPostalCode(cep) {
+  const d = String(cep || '').replace(/\D/g, '')
+  return d.length === 8 ? d.slice(0, 5) + '-' + d.slice(5) : (cep || '—')
+}
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+/* ---------------------------------------------------------------- payload */
+
+/** Espelha UpdateCustomerDataBodySchema. O schema e `.strict()`: chave desconhecida e erro. */
+const SUPPLEMENT_FIELDS = [
+  'sex', 'nationality', 'documentType', 'documentNumber', 'documentState',
+  'documentIssueDate', 'documentIssuer', 'maritalStatus', 'motherName',
+  'otherIncome', 'city', 'state', 'district',
+  'accountCheckDigit', 'branchCheckDigit', 'correctedPhone', 'correctedPostalCode',
+  'correctedStreet', 'correctedStreetNumber', 'correctedBankCode', 'correctedBankBranch', 'correctedBankAccount',
+]
+
+/**
+ * Monta o PATCH a partir dos campos da tela. Campo vazio e OMITIDO, nunca enviado como "" — o
+ * backend trata string vazia como faltando e o `.strict()` recusa chave fora da lista.
+ *
+ * `pep` so entra quando o cliente escolheu uma opcao: enviar `false` por omissao marcaria a
+ * pergunta como respondida sem ele ter dito nada (RF-DAD-002).
+ */
+function buildSupplementPayload(values) {
+  const payload = {}
+  for (const field of SUPPLEMENT_FIELDS) {
+    const v = values[field]
+    if (v === undefined || v === null || String(v).trim() === '') continue
+    payload[field] = field === 'otherIncome' ? parseBrNumber(v) : String(v).trim()
+  }
+  if (values.pep === 'sim' || values.pep === 'nao') payload.pep = values.pep === 'sim'
+  return payload
+}
+
+function readForm(form) {
+  const values = {}
+  for (const el of form.querySelectorAll('[name]')) values[el.name] = el.value
+  return values
+}
+
+/* ------------------------------------------------------------------ estado */
+
+// Etapa e proposalId em sessionStorage: sem isso, um reload no meio da jornada perde a proposta e o
+// colaborador volta pro comeco sem aviso. A proposta em si (nome, salario) fica so em memoria.
+const WIZARD_STEPS = ['CPF', 'Oferta', 'Dados', 'Envio', 'Confirmação']
+const S_KEY = 'buniProposal'
+
+let S = (() => {
+  try { return JSON.parse(sessionStorage.getItem(S_KEY)) || {} } catch { return {} }
+})()
+if (!S.step) S.step = 1
+
+function save() {
+  sessionStorage.setItem(S_KEY, JSON.stringify({ step: S.step, proposalId: S.proposalId }))
+}
+
+function goToStep(step) {
+  S.step = step
+  save()
+  render()
+  window.scrollTo(0, 0)
+}
+
+function restart() {
+  S = { step: 1 }
+  sessionStorage.removeItem(S_KEY)
+  render()
+}
+
+const app = document.getElementById('app')
+
+/**
+ * Toda pintura de tela abre uma geracao nova; resposta assincrona so pinta (ou religa timer) se a
+ * geracao dela ainda e a vigente. Um mecanismo so contra as corridas de troca de modo, aba ou tela:
+ * sem ele, um GET lento pintava o colaborador por cima do backoffice, ou as Filas sobre o Historico.
+ */
+let generation = 0
+function newScreen() {
+  const g = ++generation
+  return () => g === generation
+}
+
+// Em analise sem condicao escolhida e a simulacao em retry: nada foi enviado ainda.
+const wasSent = (p) => !!p && (['SUBMITTED', 'APPROVED', 'DISBURSED', 'INTEGRATED'].includes(p.status) || (['REJECTED', 'CANCELLED'].includes(p.status) && !!p.proposalNumber) || (p.status === 'UNDER_REVIEW' && !!p.selectedOfferId))
+
+function paintStepper() {
+  // Confirmacao sem envio (inelegivel, recusada, cancelada…): Oferta, Dados e Envio nao aconteceram.
+  const unsent = S.step === WIZARD_STEPS.length && !wasSent(S.proposal)
+  document.getElementById('stepper').innerHTML = WIZARD_STEPS.map((label, i) => {
+    const n = i + 1
+    const done = n < S.step && !(unsent && n > 1)
+    const cls = n === S.step ? 'step active' : done ? 'step done' : 'step'
+    return '<div class="' + cls + '"><span class="dot">' + (done ? '✓' : n) + '</span><span class="lbl">' + label + '</span></div>'
+  }).join('')
+  // A confirmacao e o fim — a proposta ja foi enviada.
+  document.getElementById('btn-voltar').classList.toggle('oculto', !(S.step > 1 && S.step < WIZARD_STEPS.length))
+}
+
+document.getElementById('btn-voltar').onclick = () => (S.step > 2 ? goToStep(S.step - 1) : restart())
+
+/** `msg` ja pinta o aviso visivel: e o recado de um comando que mudou a tela (ver `route`). */
+function alertBox(id, msg) {
+  return '<div class="aviso erro' + (msg ? '' : ' oculto') + '" id="' + id + '" role="alert">' + esc(msg || '') + '</div>'
+}
+
+// Resposta que chega depois de o usuario trocar de tela nao tem mais onde pintar: ignora.
+function showError(id, msg) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.textContent = msg
+  el.classList.remove('oculto')
+}
+
+function clearError(id) {
+  const el = document.getElementById(id)
+  if (el) el.classList.add('oculto')
+}
+
+/** Desabilita o botao enquanto a chamada esta no ar — clique duplo em POST nao e inocente. */
+async function withButton(btn, busyLabel, fn) {
+  const original = btn.textContent
+  btn.disabled = true
+  btn.textContent = busyLabel
+  try { await fn() } finally { btn.disabled = false; btn.textContent = original }
+}
+
+/** Situação na esteira da Função (GET da proposta). `null` = sem número ou Função fora do ar. */
+const PIPELINE_STATUS_LABEL = {
+  IN_PROGRESS: 'Em andamento', APPROVED: 'Aprovada', PENDING: 'Pendente', REJECTED: 'Reprovada',
+  DISBURSED: 'Liberada', INTEGRATED: 'Integrada', CANCELLED: 'Cancelada', UNKNOWN: 'Situação não reconhecida',
+}
+/** Situação nas consultas de cadastro da Função (backoffice), como a API devolve. */
+const FUNCAO_ORIGIN_STATUS_LABEL = { ACTIVE: 'Ativo', INACTIVE: 'Inativo', UNKNOWN: 'Não reconhecida' }
+const FUNCAO_EMPLOYEE_STATUS_LABEL = { ACTIVE: 'Ativo', ON_LEAVE: 'Afastado', TERMINATED: 'Desligado', UNKNOWN: 'Não reconhecida' }
+function pipelineBox(pipeline) {
+  if (!pipeline) return ''
+  const reasons = (pipeline.reasons || []).map((m) => m.description || m.code).filter(Boolean).join('; ')
+  return '<div id="esteira">' + boxes([
+    { label: 'Na Função', value: (PIPELINE_STATUS_LABEL[pipeline.status] || pipeline.status) + (pipeline.activityDescription ? ' — ' + pipeline.activityDescription : '') },
+    ...(reasons ? [{ label: 'Motivos', value: reasons }] : []),
+  ]) + '</div>'
+}
+
+function boxes(items) {
+  return '<div class="grid">' + items.map((i) =>
+    '<div class="box' + (i.highlight ? ' destaque' : '') + (i.wide ? ' largo' : '') + '"><div class="rot">' + esc(i.label) + '</div><div class="val">' + esc(i.value) + '</div>' + (i.sub ? '<span class="sub">' + esc(i.sub) + '</span>' : '') + '</div>'
+  ).join('') + '</div>'
+}
+
+/* ------------------------------------------------------ vocabulario da spec */
+
+// Status da proposta como a API devolve (Especificacao Tecnica, UC09) -> rotulo da tela.
+const STATUS_LABEL = {
+  STARTED: 'Iniciada', INELIGIBLE: 'Sem oferta', SIMULATED: 'Simulada',
+  AWAITING_CUSTOMER_DATA: 'Aguardando cadastro', UNDER_REVIEW: 'Em análise', SUBMITTED: 'Incluída',
+  REJECTED: 'Recusada', ERROR: 'Com erro', CANCELLED: 'Cancelada',
+  // So com a esteira da Funcao consultada (GET de uma proposta): a incluida mostra o desfecho dela.
+  APPROVED: 'Aprovada', DISBURSED: 'Liberada', INTEGRATED: 'Integrada',
+}
+
+/**
+ * Mensagem ao colaborador por status. Nenhuma revela motivo tecnico (EF secao 27). Inelegivel e
+ * a mesma para "CPF nao existe", "so demitido" e "menos de 1 ano" (RF-ELG-002/003): o status nao
+ * diz qual foi, e a tela nao pode dizer.
+ */
+const STATUS_MESSAGE = {
+  INELIGIBLE: 'Não há oferta disponível para o cliente informado.',
+  AWAITING_CUSTOMER_DATA: 'Complete seus dados para concluir a contratação.',
+  UNDER_REVIEW: 'Sua proposta está sendo processada. Acompanhe por aqui.',
+  REJECTED: 'A proposta não foi aprovada pela instituição financeira.',
+  ERROR: 'Não foi possível concluir sua proposta agora. Nossa equipe foi avisada.',
+  CANCELLED: 'Esta proposta foi cancelada.',
+}
+
+// Etapas da saga (proposal_step), na ordem da jornada.
+const STEP_LABEL = {
+  ELIGIBILITY: 'Elegibilidade', AGREEMENT: 'Convênio', SIMULATION: 'Simulação',
+  CUSTOMER_PF: 'Cliente PF', CONSOLIDATION: 'Consolidação', INCLUSION: 'Inclusão',
+}
+
+const STEP_STATUS_LABEL = { PENDING: 'em andamento', SUCCEEDED: 'concluída', FAILED: 'com falha' }
+
+// Os enums abaixo sao do backend, em ingles (entities e commons/reason-code.ts); a tela mostra o
+// rotulo e, para o operador, o codigo embaixo — e o codigo que se procura no log.
+
+// proposal.status (ProposalInternalStatus).
+const INTERNAL_STATUS_LABEL = {
+  CREATED: 'Criada', INELIGIBLE: 'Inelegível',
+  UNAVAILABLE: 'Indisponível (dado de referência)', ELIGIBLE: 'Elegível', SIMULATING: 'Simulando',
+  SIMULATED: 'Simulada', CONDITION_SELECTED: 'Condição escolhida', READY_TO_SUBMIT: 'Pronta para envio',
+  SUBMITTING: 'Enviando à Função', PROPOSAL_CREATED: 'Incluída na Função', ERROR_RETRYABLE: 'Erro retentável',
+  REJECTED: 'Recusada', CANCELLED: 'Cancelada', FAILED_PERMANENT: 'Falha definitiva (DLQ)',
+}
+
+// outbox_event.type (OutboxEventType).
+const EVENT_LABEL = {
+  SIMULATION_RETRY_REQUESTED: 'Reprocessar simulação',
+  INCLUSION_RETRY_REQUESTED: 'Reprocessar inclusão',
+}
+
+// Motivo tecnico (ReasonCode): reason_code, error_code e last_error.
+const REASON_LABEL = {
+  INVALID_STATE_FOR_IDENTIFY: 'Estado não permite identificar',
+  INVALID_STATE_FOR_SIMULATION: 'Estado não permite simular',
+  INVALID_STATE_FOR_CUSTOMER_DATA: 'Estado não permite editar o cadastro',
+  INVALID_STATE_FOR_INCLUSION: 'Estado não permite incluir',
+  PROPOSAL_STATE_CONFLICT: 'Conflito de estado da proposta',
+  DUPLICATE_ACTIVE_PROPOSAL: 'Já existe proposta ativa para a matrícula',
+  NOT_CANCELLABLE: 'Estado não permite cancelar',
+  CANCELLED_BY_REQUEST: 'Cancelada a pedido',
+  SNAPSHOT_MISSING: 'Vínculo congelado ausente',
+  NOT_ACTIVE: 'Vínculo não ativo',
+  ON_VACATION: 'Vínculo de férias',
+  TENURE_BELOW_1_YEAR: 'Menos de 1 ano de casa',
+  MISSING_ADMISSION_DATE: 'Sem data de admissão',
+  AGREEMENT_BAND_MISSING: 'Sem convênio para o tempo de casa',
+  NO_PUBLISHED_EMPLOYMENT_BATCH: 'Sem lote de vínculos publicado',
+  ORIGIN5_NOT_FOUND: 'Filial (Origem5) não cadastrada',
+  ORIGIN_MAPPING_UNAVAILABLE: 'Mapa de origens indisponível',
+  REFERENCE_DATA_UNAVAILABLE: 'Dado de referência indisponível',
+  SIMULATION_ALREADY_RUNNING: 'Simulação já em andamento',
+  SIMULATION_CALL_FAILED: 'Falha na chamada de simulação',
+  SIMULATION_FAILED: 'Simulação falhou',
+  SIMULATION_REJECTED: 'Simulação recusada pela Função',
+  CONVENIO_MISMATCH: 'Convênio divergente na Função',
+  OFFER_TABLE_CALL_FAILED: 'Falha na tabela de ofertas',
+  OFFER_TABLE_EMPTY: 'Tabela de ofertas vazia',
+  CONDITION_NOT_FOUND: 'Condição não encontrada',
+  CONDITION_SUPERSEDED: 'Condição substituída por simulação mais nova',
+  CONDITION_EXPIRED: 'Condição vencida',
+  NO_CONDITION_SELECTED: 'Nenhuma condição escolhida',
+  TERM_NOT_OFFERED: 'Prazo fora da tabela de prazos',
+  AMOUNT_OUT_OF_RANGE: 'Valor fora da faixa do prazo',
+  CHECK_FAILED: 'Falha ao consultar o Cliente PF',
+  CUSTOMER_DATA_MISSING: 'Cadastro do colaborador incompleto',
+  CUSTOMER_DATA_INCOMPLETE: 'Cadastro do colaborador incompleto',
+  INCOME_MISSING: 'Vínculo sem salário na base',
+  UPSERT_FAILED: 'Falha ao gravar o Cliente PF',
+  CUSTOMER_PF_WITHOUT_DATA: 'Cliente PF sem dados',
+  CUSTOMER_PF_UPDATE_REJECTED: 'Função recusou atualizar o Cliente PF',
+  CUSTOMER_PF_UPDATE_FAILED: 'Falha ao atualizar o Cliente PF',
+  CUSTOMER_PF_READ_FAILED: 'Falha ao ler o Cliente PF',
+  SUBMIT_ALREADY_RUNNING: 'Envio já em andamento',
+  PROPOSAL_CALL_FAILED: 'Falha na chamada de inclusão',
+  PROPOSAL_PAYLOAD_INVALID: 'Dados da proposta inválidos',
+  PROPOSAL_REJECTED: 'Inclusão recusada pela Função',
+  OPEN_OPERATIONS_LIMIT: 'CPF no limite de operações em aberto na Função',
+  PROPOSAL_SUCCESS_WITHOUT_NUMBER: 'Função respondeu sucesso sem número',
+  PROPOSAL_CREATED_NOT_RECORDED: 'Criada na Função, número não gravado',
+  PROPOSAL_OUTCOME_UNKNOWN: 'Desfecho da inclusão desconhecido',
+  OUTCOME_UNKNOWN: 'Desfecho desconhecido',
+  RECONCILED_NOT_CREATED: 'Conciliada: não criada na Função',
+  RECONCILE_AMBIGUOUS: 'Conciliação: mais de uma proposta nova na Função',
+  PIPELINE_REJECTED: 'Reprovada na esteira da Função',
+  PIPELINE_CANCELLED: 'Cancelada na esteira da Função',
+  RETRY_EXHAUSTED: 'Tentativas esgotadas',
+  UNEXPECTED: 'Erro inesperado',
+  FUNCAO_UNAVAILABLE: 'Função indisponível',
+  FUNCAO_CALL_FAILED: 'Falha na chamada à Função',
+  FUNCAO_REJECTED: 'Recusado pela Função',
+  VIACEP_FAILED: 'Falha no ViaCEP',
+  EMPLOYEE_NOT_FOUND: 'Funcionário não encontrado',
+}
+
+/**
+ * Rotulo pt-BR com o codigo embaixo. Motivo pode vir com detalhe (`CODIGO: detalhe`, `withDetail`
+ * no backend): o rotulo sai do prefixo e o detalhe acompanha o codigo. Codigo sem rotulo aparece cru.
+ */
+const labelOf = (labels, value) => (value ? labels[String(value).split(':')[0].trim()] || value : '—')
+function labelWithCode(labels, value) {
+  const label = labelOf(labels, value)
+  return value && label !== value ? esc(label) + '<span class="sub">' + esc(value) + '</span>' : esc(label)
+}
+/** Texto puro, para onde ja e `.sub`: "Rotulo · CODIGO". */
+const labelCodeText = (labels, value) => (value && labelOf(labels, value) !== value ? labelOf(labels, value) + ' · ' + value : labelOf(labels, value))
+/** Item de `boxes()`: rotulo no valor, codigo no `sub`. */
+const codeBox = (label, labels, value) => ({ label, value: labelOf(labels, value), sub: value && labelOf(labels, value) !== value ? value : null })
+const reasonLabel = (v) => labelWithCode(REASON_LABEL, v)
+const stepStatusLabel = (s) => STEP_STATUS_LABEL[s] || s
+
+const tagStatus = (s) => '<span class="tag st-' + esc(s) + '" data-status="' + esc(s) + '">' + esc(STATUS_LABEL[s] || s) + '</span>'
+
+/**
+ * "Por que recebi essa condicao" (user story): o convenio vem da faixa de tempo de casa (RN05).
+ * Faixa aberta (sem maximo) vira "N anos ou mais".
+ */
+function agreementText(agreement, tenureYears) {
+  if (!agreement) return '—'
+  const { code, tenureMinYears: min, tenureMaxYears: max } = agreement
+  const band = min == null ? '' : max == null ? ' — ' + min + ' anos de casa ou mais' : ' — de ' + min + ' a ' + max + ' anos de casa'
+  return 'Convênio ' + code + band + (tenureYears == null ? '' : ' (você tem ' + tenureYears + (tenureYears === 1 ? ' ano' : ' anos') + ')')
+}
+
+/**
+ * Trilha da saga (UC01-UC08) para o colaborador, derivada so do que GET /proposals/:id devolve:
+ * etapas antes da atual estao concluidas, a atual tem o status dela, as seguintes estao a seguir.
+ * Incluida fecha tudo. Inelegivel nao tem trilha — mostrar ate onde chegou diria se o CPF esta na
+ * base ou so tem pouco tempo de casa (RF-ELG-002/003).
+ */
+const STEP_ORDER = ['ELIGIBILITY', 'AGREEMENT', 'SIMULATION', 'CUSTOMER_PF', 'CONSOLIDATION', 'INCLUSION']
+
+// Status em que a proposta parou sem incluir: as etapas seguintes nao vao acontecer, nao estao "a seguir".
+const STOPPED_WITHOUT_INCLUSION = ['CANCELLED', 'REJECTED', 'ERROR']
+
+function journeySteps(p) {
+  if (!p || p.status === 'INELIGIBLE') return []
+  const current = p.currentStep
+  const idx = p.status === 'SUBMITTED' ? STEP_ORDER.length : current ? STEP_ORDER.indexOf(current.step) : -1
+  const afterState = STOPPED_WITHOUT_INCLUSION.includes(p.status) ? 'neutra' : 'pendente'
+  return STEP_ORDER.map((step, i) => ({
+    step,
+    state: i < idx ? 'concluida'
+      : i > idx ? afterState
+      : current.status === 'SUCCEEDED' ? 'concluida'
+      : current.status === 'FAILED' ? 'falha'
+      : 'atual',
+  }))
+}
+
+function paintTrail(p) {
+  const steps = journeySteps(p)
+  return steps.length
+    ? '<h2>Onde está sua proposta</h2><ol class="trilha" id="trilha">' + steps.map((e) =>
+      '<li class="' + e.state + '" data-etapa="' + e.step + '">' + esc(STEP_LABEL[e.step]) + '</li>').join('') + '</ol>'
+    : ''
+}
+
+/**
+ * Recusa da Funcao na inclusao: a proposta volta a ERROR_RETRYABLE (`canRetry`) e o colaborador
+ * corrige os dados e reenvia. Erro sem `canRetry` (DLQ, retry agendado) nao tem acao na tela.
+ */
+const canResume = (p) => p.status === 'ERROR' && !!p.canRetry && !!p.selectedOfferId
+
+// READY_TO_SUBMIT aparece como 'SIMULATED': o que separa Oferta de Envio e a condicao escolhida.
+const stepFor = (p) =>
+  p.status === 'SIMULATED' ? (p.selectedOfferId ? 4 : 2)
+    : p.status === 'AWAITING_CUSTOMER_DATA' ? 3
+    : canResume(p) ? 4
+    : 5
+
+// Recado do comando que acabou de mudar a tela (ex.: condicao vencida no envio volta a Oferta).
+let notice = null
+const takeNotice = () => { const n = notice; notice = null; return n }
+
+/**
+ * Depois de qualquer comando a tela segue o que a API diz, nunca o que ela supos — salvo `step`,
+ * quando o comando decide a etapa seguinte. A tela so e pintada se quem pediu ainda e a tela
+ * vigente (`isCurrent`). Resposta obsoleta so grava o estado se a sessao ainda e da mesma proposta
+ * (troca de modo no meio do comando): depois de "Voltar" ou "Nova consulta" ela regravava a etapa
+ * sem proposalId, e a retomada ficava presa nessa proposta.
+ */
+function route(p, isCurrent, { step, message } = {}) {
+  if (isCurrent && !isCurrent()) {
+    if (S.proposalId === p.proposalId) { S.proposal = p; S.step = step || stepFor(p); save() }
+    return
+  }
+  S.proposal = p
+  S.step = step || stepFor(p)
+  notice = message || null
+  save()
+  render()
+  window.scrollTo(0, 0)
+}
+
+// Comando que espera resposta passa o id que capturou: lido de S depois do await, um "Voltar" no
+// meio ja zerou a sessao e o GET saia para /proposals/undefined.
+const loadProposal = (id = S.proposalId) => api('GET', '/proposals/' + id)
+
+// Retomada: o sessionStorage guarda so ONDE o colaborador estava. Ao abrir a pagina, o status vem
+// de novo da API — o worker pode ter incluido, reagendado ou mandado para a DLQ enquanto isso.
+let synced = false
+
+function render() {
+  paintStepper()
+  const isCurrent = newScreen()
+  if (S.proposalId && !synced) {
+    synced = true
+    app.innerHTML = '<div class="card"><p class="hint">Retomando sua proposta…</p></div>'
+    loadProposal().then((p) => route(p, isCurrent)).catch((err) => {
+      // Falhou com o usuario em outro modo: ao voltar, sincroniza de novo em vez de mostrar a
+      // proposta da sessao (talvez velha) como se a API tivesse respondido.
+      if (!isCurrent()) { synced = false; return }
+      app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div>' +
+        '<button class="acao sec" id="btn-retomar">Tentar de novo</button><div style="height:10px"></div>' +
+        '<button class="acao" id="btn-nova">Nova consulta</button></div>'
+      document.getElementById('btn-retomar').onclick = () => { synced = false; render() }
+      document.getElementById('btn-nova').onclick = restart
+    })
+    return
+  }
+  const screens = [cpfScreen, offerScreen, customerDataScreen, reviewScreen, trackingScreen]
+  screens[S.step - 1](isCurrent)
+}
+
+/* -------------------------------------------------------------- 1 · CPF */
+
+/** Mascara enquanto digita: 000.000.000-00. */
+function maskCpf(value) {
+  const d = value.replace(/\D/g, '').slice(0, 11)
+  return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/(\d{3})(\d{1,2})$/, '$1-$2')
+}
+
+function cpfScreen(isCurrent) {
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Simule seu consignado</h1>' +
+      '<p class="hint">Só o CPF: encontramos sua matrícula (a de admissão mais antiga, se houver mais de uma), o convênio pelo seu tempo de casa e simulamos com 30% do seu salário no maior prazo do convênio. Na oferta, você pode trocar o prazo e pedir um valor menor. Se você já tem uma proposta em andamento, voltamos para ela. Para só ver o andamento das suas propostas, use <strong>Acompanhar</strong>.</p>' +
+      '<div class="grid form"><div>' +
+        '<label for="cpf">CPF <span class="req">*</span></label>' +
+        '<input id="cpf" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00">' +
+      '</div></div>' +
+      '<div style="height:14px"></div>' +
+      alertBox('erro-cpf') +
+      '<button class="acao" id="btn-cpf">Simular</button><div style="height:10px"></div>' +
+      '<button class="acao sec" id="btn-acompanhar">Acompanhar minhas propostas</button>' +
+      '<div id="minhas-propostas"></div>' +
+    '</div>'
+
+  const cpf = document.getElementById('cpf')
+  cpf.oninput = () => { cpf.value = maskCpf(cpf.value) }
+
+  // So leitura: lista as propostas do CPF (ativas e encerradas) sem abrir nem simular nada.
+  document.getElementById('btn-acompanhar').onclick = (e) => withButton(e.target, 'Consultando…', async () => {
+    clearError('erro-cpf')
+    const digits = cpf.value.replace(/\D/g, '')
+    if (digits.length !== 11) return showError('erro-cpf', 'Informe os 11 dígitos do CPF.')
+    try {
+      const { proposals } = await api('POST', '/proposals/lookup', { cpf: digits })
+      if (!isCurrent()) return
+      const list = document.getElementById('minhas-propostas')
+      list.innerHTML = proposals.length
+        ? '<div style="height:14px"></div>' + proposals.map((p) =>
+            '<div class="box" style="margin-bottom:8px"><div class="cab-card">' +
+              '<div class="val">' + (p.proposalNumber ? 'Proposta nº ' + esc(p.proposalNumber) : 'Proposta de ' + esc(formatDateTime(p.createdAt))) +
+                '<span class="sub">ID de acompanhamento ' + esc(p.proposalId) + '</span>' +
+                '<span class="sub">Atualizada em ' + esc(formatDateTime(p.updatedAt)) + (STATUS_MESSAGE[p.status] ? ' · ' + esc(STATUS_MESSAGE[p.status]) : '') + '</span></div>' +
+              tagStatus(p.status) +
+            '</div><button class="alterar" data-acompanhar="' + esc(p.proposalId) + '">Ver andamento</button></div>').join('')
+        : '<div style="height:14px"></div><p class="hint">Nenhuma proposta encontrada para este CPF.</p>'
+      for (const b of list.querySelectorAll('[data-acompanhar]')) {
+        b.onclick = () => withButton(b, 'Abrindo…', async () => {
+          try {
+            S = { step: 1, proposalId: b.dataset.acompanhar }
+            synced = true
+            route(await loadProposal(b.dataset.acompanhar), isCurrent)
+          } catch (err) {
+            if (isCurrent()) showError('erro-cpf', err.message)
+          }
+        })
+      }
+    } catch (err) {
+      if (isCurrent()) showError('erro-cpf', err.message)
+    }
+  })
+
+  document.getElementById('btn-cpf').onclick = (e) => withButton(e.target, 'Simulando…', async () => {
+    clearError('erro-cpf')
+    const digits = cpf.value.replace(/\D/g, '')
+    if (digits.length !== 11) return showError('erro-cpf', 'Informe os 11 dígitos do CPF.')
+    try {
+      const { proposalId } = await api('POST', '/proposals', { cpf: digits })
+      S = { step: 1, proposalId }
+      synced = true
+      route(await loadProposal(), isCurrent)
+    } catch (err) {
+      if (isCurrent()) showError('erro-cpf', err.message)
+    }
+  })
+}
+
+/* ------------------------------------------------------------ 2 · Oferta */
+
+/**
+ * RN04 na tela. Sem parcela pedida (oferta do ajuste de prazo e valor) o box some — `brl(null)` mostrava R$ 0,00.
+ * Salario zerado na base: a API estima a renda (EF Adendo 1 secao 11.2), entao nao e "seu salario".
+ */
+function requestedInstallmentLabel(p) {
+  if (p.requestedInstallment == null) return null
+  const salary = p.employee && p.employee.salary
+  return salary > 0
+    ? 'Parcela pedida à instituição — 30% do seu salário de ' + brl(salary)
+    : 'Parcela pedida à instituição — 30% da renda estimada (sua base não informa salário)'
+}
+
+/** Crédito máximo (RF-PRE-001): a oferta de maior valor como a Função devolveu — só escolhida aqui. */
+const bestOffer = (offers) => (offers || []).reduce((best, o) => (!best || o.requestedAmount > best.requestedAmount ? o : best), null)
+
+// Oferta do ajuste (requote) nao tem parcela pedida: o valor e o escolhido, nao o maximo.
+const offerHeadline = (p) => (p.requestedInstallment == null ? 'Valor escolhido por você' : 'Crédito máximo disponível')
+
+/** Valor do ajuste em centavos, entre o piso da API e o maximo do prazo; fora disso a API daria 422. */
+function checkRequoteAmount(raw, min, max) {
+  const amount = Math.round(parseBrNumber(raw) * 100) / 100
+  return amount >= min && amount <= max ? { amount } : { error: 'Informe um valor entre ' + brl(min) + ' e ' + brl(max) + '.' }
+}
+
+function requoteForm(table, currentCount) {
+  if (!table.options.length) return '<p class="hint">A instituição não aceitou nenhum prazo agora. Fique com a oferta acima ou tente mais tarde.</p>'
+  const chosen = table.options.find((t) => t.installmentCount === currentCount) || table.options[0]
+  return '<fieldset style="margin-bottom:14px"><legend>Prazo</legend><div class="grid">' +
+      table.options.map((t) => '<label class="box prazo"><input type="radio" name="prazo" value="' + esc(t.installmentCount) + '" data-max="' + esc(t.availableAmount) + '"' +
+        (t === chosen ? ' checked' : '') + '>' + esc(t.installmentCount + 'x · até ' + brl(t.availableAmount)) + '</label>').join('') +
+    '</div></fieldset>' +
+    formField('valor-ajuste', 'Valor desejado', '<input id="valor-ajuste" type="number" inputmode="decimal" step="0.01" min="' + esc(table.minAmount) +
+      '" max="' + esc(chosen.availableAmount) + '" value="' + esc(chosen.availableAmount) + '">') +
+    '<p class="hint" id="faixa-ajuste" style="margin-top:6px"></p>' +
+    '<button class="acao" id="btn-simular">Simular</button>'
+}
+
+function bindRequote(table, isCurrent) {
+  const amount = document.getElementById('valor-ajuste')
+  if (!amount) return
+  const paintRange = () => {
+    document.getElementById('faixa-ajuste').textContent = 'Entre ' + brl(table.minAmount) + ' e ' + brl(amount.max) +
+      '. Em prazo curto a instituição pode recusar valores baixos.'
+  }
+  for (const r of document.querySelectorAll('input[name="prazo"]')) {
+    r.onchange = () => { amount.max = r.dataset.max; amount.value = r.dataset.max; paintRange() }
+  }
+  paintRange()
+  document.getElementById('btn-simular').onclick = (ev) => withButton(ev.currentTarget, 'Simulando…', async () => {
+    clearError('erro-ajuste')
+    const term = document.querySelector('input[name="prazo"]:checked')
+    const checked = checkRequoteAmount(amount.value, table.minAmount, Number(term.dataset.max))
+    if (checked.error) return showError('erro-ajuste', checked.error)
+    const id = S.proposalId
+    // Escolher no meio do ajuste pegaria a oferta que ele vai substituir.
+    const locked = document.querySelectorAll('#oferta button, #btn-cancelar, #btn-voltar')
+    for (const b of locked) b.disabled = true
+    try {
+      await api('POST', '/proposals/' + id + '/requote', { installmentCount: Number(term.value), requestedAmount: checked.amount })
+      route(await loadProposal(id), isCurrent)
+    } catch (err) {
+      if (isCurrent()) showError('erro-ajuste', err.message)
+    } finally {
+      for (const b of locked) b.disabled = false
+    }
+  })
+}
+
+const offerBoxes = (o) =>
+  boxes([
+    { label: 'Parcela mensal', value: brl(o.installmentAmount) },
+    { label: 'Nº de parcelas', value: o.installmentCount + 'x' },
+    { label: 'CET (a.m.)', value: Number(o.monthlyCet).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' },
+    { label: 'IOF', value: brl(o.iofAmount) },
+    { label: 'Valor total', value: brl(o.totalAmount) },
+    { label: '1º vencimento', value: formatDate(o.firstDueDate) },
+    { label: 'Último vencimento', value: formatDate(o.lastDueDate) },
+  ])
+
+function offerScreen(isCurrent) {
+  const p = S.proposal
+  if (!p) return restart()
+  const c = p.employee || {}
+  const o = bestOffer(p.offers)
+
+  app.innerHTML =
+    '<div class="card condicao" id="oferta">' +
+      '<div class="cab-card"><h1>Sua oferta</h1>' + tagStatus(p.status) + '</div>' +
+      '<p class="hint">Simulação real na Função com o seu cadastro na empresa — nada é calculado no navegador.</p>' +
+      alertBox('erro-prop', takeNotice()) +
+      (o
+        ? '<div class="box destaque" id="credito-maximo" style="margin-bottom:10px"><div class="rot">' + esc(offerHeadline(p)) + '</div><div class="val">' + esc(brl(o.requestedAmount)) + '</div></div>' +
+          offerBoxes(o) +
+          // A Funcao confirma os 30% ou devolve um limite: a margem do CPF ou o teto de valor do produto
+          // (003031-003034). Nos dois a condicao vem com parcela menor, e a tela diz por que — senao os
+          // dois valores se contradizem. "Limite disponivel" cobre os dois: nem sempre e o convenio.
+          (p.requestedInstallment != null && o.installmentAmount < p.requestedInstallment
+            ? '<div class="aviso info" id="margem-ajustada">A instituição ajustou a parcela ao limite disponível.</div>'
+            : '') +
+          '<button class="acao coral" data-oferta="' + esc(o.offerId) + '">Quero esta oferta</button>'
+        : '<div class="aviso info">Não há oferta disponível nesta simulação. Faça uma nova consulta pelo CPF.</div>') +
+    '</div>' +
+    (o
+      ? '<div class="card" id="ajuste"><h2>Ajustar prazo e valor</h2>' +
+          '<p class="hint">Prefere menos parcelas ou um valor menor? Veja os prazos que a instituição aceita para você.</p>' +
+          alertBox('erro-ajuste') +
+          '<div id="prazos"><button class="acao sec" id="btn-ver-prazos">Ver prazos</button></div>' +
+        '</div>'
+      : '') +
+    '<div class="card">' +
+      '<h2>Por que esta condição</h2>' +
+      boxes([
+        { label: 'Nome', value: c.name, wide: true },
+        { label: 'Empresa', value: c.employer, wide: true },
+        { label: 'Matrícula', value: c.employeeNumber },
+        { label: 'Admissão', value: formatDate(c.hireDate) },
+      ]) +
+      '<div class="box" id="convenio" style="margin-bottom:10px"><div class="rot">Convênio pelo seu tempo de casa</div><div class="val">' + esc(agreementText(p.agreement, c.tenureYears)) + '</div></div>' +
+      (requestedInstallmentLabel(p) ? '<div class="box" id="valor-calculado"><div class="rot">' + esc(requestedInstallmentLabel(p)) + '</div><div class="val">' + esc(brl(p.requestedInstallment)) + '</div></div>' : '') +
+    '</div>' +
+    '<button class="acao sec" id="btn-cancelar">Cancelar proposta</button>'
+
+  // Escolher nao envia nada a Funcao: os dados sempre passam pela tela de Dados antes do envio.
+  for (const b of document.querySelectorAll('[data-oferta]')) {
+    b.onclick = (ev) => withButton(ev.currentTarget, 'Escolhendo…', async () => {
+      const id = S.proposalId
+      // Um ajuste no meio da escolha substituiria a oferta escolhida.
+      const locked = document.querySelectorAll('#ajuste button')
+      for (const x of locked) x.disabled = true
+      try {
+        await api('POST', '/proposals/' + id + '/offer', { offerId: b.dataset.oferta })
+        route(await loadProposal(id), isCurrent, { step: 3 })
+      } catch (err) {
+        if (isCurrent()) showError('erro-prop', err.message)
+      } finally {
+        for (const x of locked) x.disabled = false
+      }
+    })
+  }
+  document.getElementById('btn-cancelar').onclick = (ev) => cancelProposal(ev.currentTarget, 'erro-prop', isCurrent)
+  const seeTerms = document.getElementById('btn-ver-prazos')
+  if (!seeTerms) return
+  // Uma simulacao na Funcao por prazo: demora, e so roda quando o colaborador pede.
+  seeTerms.onclick = (ev) => withButton(ev.currentTarget, 'Consultando prazos…', async () => {
+    clearError('erro-ajuste')
+    try {
+      const table = await api('POST', '/proposals/' + S.proposalId + '/options')
+      if (!isCurrent()) return
+      document.getElementById('prazos').innerHTML = requoteForm(table, o.installmentCount)
+      bindRequote(table, isCurrent)
+    } catch (err) {
+      if (isCurrent()) showError('erro-ajuste', err.message)
+    }
+  })
+}
+
+function cancelProposal(btn, errorId, isCurrent) {
+  return withButton(btn, 'Cancelando…', async () => {
+    const id = S.proposalId
+    try {
+      await api('POST', '/proposals/' + id + '/cancel')
+      route(await loadProposal(id), isCurrent)
+    } catch (err) {
+      if (isCurrent()) showError(errorId, err.message)
+    }
+  })
+}
+
+/* ------------------------------------------------------------- 3 · Dados */
+
+// Enums da declaracao como a API fala (ingles) -> rotulo da tela; a ordem e a das opcoes do select.
+const SEX_LABEL = { MALE: 'Masculino', FEMALE: 'Feminino' }
+const NATIONALITY_LABEL = { BRAZILIAN: 'Brasileira', FOREIGN: 'Estrangeira' }
+const MARITAL_STATUS_LABEL = {
+  SINGLE: 'Solteiro(a)', MARRIED: 'Casado(a)', STABLE_UNION: 'União estável', DIVORCED: 'Divorciado(a)',
+  LEGALLY_SEPARATED: 'Separado(a) judicialmente', WIDOWED: 'Viúvo(a)', OTHER: 'Outro',
+}
+
+const FIELD_LABEL = {
+  sex: 'Sexo', nationality: 'Nacionalidade', motherName: 'Nome da mãe', maritalStatus: 'Estado civil',
+  documentType: 'Tipo de documento', documentNumber: 'Número do documento', documentState: 'UF emissora',
+  documentIssueDate: 'Data de emissão do documento', documentIssuer: 'Órgão emissor',
+  city: 'Cidade do endereço', state: 'UF do endereço', district: 'Bairro do endereço',
+  accountCheckDigit: 'Dígito da conta', branchCheckDigit: 'Dígito da agência', pep: 'Pessoa politicamente exposta (PEP)',
+  otherIncome: 'Renda mensal adicional', correctedPhone: 'Telefone', correctedPostalCode: 'CEP',
+  correctedStreet: 'Rua', correctedStreetNumber: 'Número do endereço', correctedBankCode: 'Código do banco',
+  correctedBankBranch: 'Agência', correctedBankAccount: 'Conta',
+}
+
+/** Espelha FIELD_MAX_LENGTH da API (customer-data-fields.ts): o input corta antes do 400 do Zod. */
+const FIELD_MAX_LENGTH = {
+  documentNumber: 16, documentIssuer: 8, motherName: 40, city: 40, district: 25,
+  accountCheckDigit: 2, branchCheckDigit: 4, correctedPhone: 20, correctedStreet: 35,
+  correctedStreetNumber: 6, correctedBankCode: 3, correctedBankBranch: 10, correctedBankAccount: 20,
+  correctedPostalCode: 9, documentState: 2, state: 2,
+}
+
+// Campo curto (UF, digito, orgao emissor) divide a linha no celular; o resto ocupa a linha toda.
+function formField(name, label, input, required) {
+  return '<div' + (FIELD_MAX_LENGTH[name] <= 8 ? ' class="curto"' : '') + '><label for="' + name + '">' + label + (required ? ' <span class="req">*</span>' : '') + '</label>' + input + '</div>'
+}
+
+const textInput = (name, value, extra) => '<input id="' + name + '" name="' + name + '" value="' + esc(value || '') + '"' +
+  (FIELD_MAX_LENGTH[name] ? ' maxlength="' + FIELD_MAX_LENGTH[name] + '"' : '') + (extra || '') + '>'
+
+function selectInput(name, value, options, emptyText) {
+  return '<select id="' + name + '" name="' + name + '">' +
+    (emptyText ? '<option value="">Selecione</option>' : '') +
+    options.map(([v, r]) => '<option value="' + esc(v) + '"' + (String(value) === v ? ' selected' : '') + '>' + esc(r) + '</option>').join('') +
+    '</select>'
+}
+
+/** `open`: ja abre em edicao — e o caso de campo que falta (sem ele nao ha onde digitar). */
+function editableBlock(id, label, display, fields, open) {
+  return '<div class="box editavel">' +
+    '<div class="cab"><div class="rot">' + label + '</div><button type="button" class="alterar" data-bloco="' + id + '">' + (open ? 'Concluir' : 'Alterar') + '</button></div>' +
+    '<div class="val' + (open ? ' oculto' : '') + '" id="ver-' + id + '">' + esc(display || 'Não informado') + '</div>' +
+    '<div class="grid form' + (open ? '' : ' oculto') + '" id="edit-' + id + '" style="margin-top:10px">' + fields + '</div>' +
+  '</div>'
+}
+
+const addressText = (k) => [k.street, k.streetNumber].filter(Boolean).join(', ') + (k.postalCode ? ' — CEP ' + formatPostalCode(k.postalCode) : '')
+const bankText = (k) => [k.bankCode && 'Banco ' + k.bankCode, k.bankBranch && 'Agência ' + k.bankBranch, k.bankAccount && 'Conta ' + k.bankAccount].filter(Boolean).join(' · ')
+
+function customerDataScreen(isCurrent) {
+  app.innerHTML = '<div class="card"><p class="hint">Carregando seus dados…</p></div>'
+
+  api('GET', '/proposals/' + S.proposalId + '/customer-data')
+    .then((view) => { if (isCurrent()) paintCustomerData(view, isCurrent) })
+    .catch((err) => { if (isCurrent()) app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div></div>' })
+}
+
+function paintCustomerData(view, isCurrent) {
+  const k = view.known
+  const f = view.supplement || {}
+  const isMissing = (field) => view.missingFields.includes(field)
+
+  // Banco 530: o digito da conta e derivado do proprio numero pela API. Pedir esse campo aqui so
+  // confundiria — o valor digitado seria ignorado no envio.
+  const bank530 = String(k.bankCode) === '530'
+
+  const identity = [
+    { label: 'Nome', value: k.name, wide: true },
+    { label: 'Empresa', value: k.employer, wide: true },
+    { label: 'Nascimento', value: formatDate(k.birthDate) },
+    { label: 'Matrícula', value: k.employeeNumber },
+    { label: 'Admissão', value: formatDate(k.hireDate) },
+    { label: 'Salário', value: brl(k.salary) },
+  ]
+  if (k.sex) identity.splice(2, 0, { label: 'Sexo', value: SEX_LABEL[k.sex] || k.sex })
+
+  // Endereco e banco sempre na tela: a base pode vir sem eles, e a API exige o que faltar (RN07).
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Complete seu cadastro</h1>' +
+      '<p class="hint">Para enviar a proposta, o cadastro de Cliente PF precisa estar completo. Confira o que já sabemos e complete só o que falta.</p>' +
+      '<form id="form-dados">' +
+        '<h2>Seus dados</h2>' +
+        '<div class="grid">' +
+          identity.map((i) => '<div class="box' + (i.wide ? ' largo' : '') + '"><div class="rot">' + esc(i.label) + '</div><div class="val">' + esc(i.value) + '</div></div>').join('') +
+          (k.phone ? editableBlock('telefone', 'Telefone', formatPhone(k.phone),
+            formField('correctedPhone', 'Novo telefone (DDD + número)', textInput('correctedPhone', f.correctedPhone, ' inputmode="numeric"'))) : '') +
+          editableBlock('endereco', 'Endereço', addressText(k),
+            formField('correctedPostalCode', 'CEP', textInput('correctedPostalCode', f.correctedPostalCode, ' inputmode="numeric"')) +
+            formField('correctedStreet', 'Rua', textInput('correctedStreet', f.correctedStreet)) +
+            formField('correctedStreetNumber', 'Número', textInput('correctedStreetNumber', f.correctedStreetNumber)),
+            ['correctedPostalCode', 'correctedStreet', 'correctedStreetNumber'].some(isMissing)) +
+          editableBlock('bancario', 'Dados bancários', bankText(k),
+            formField('correctedBankCode', 'Código do banco', textInput('correctedBankCode', f.correctedBankCode)) +
+            formField('correctedBankBranch', 'Agência', textInput('correctedBankBranch', f.correctedBankBranch)) +
+            formField('correctedBankAccount', 'Conta (sem dígito)', textInput('correctedBankAccount', f.correctedBankAccount)),
+            ['correctedBankCode', 'correctedBankBranch', 'correctedBankAccount'].some(isMissing)) +
+        '</div>' +
+        '<p class="hint">Nome, nascimento, empresa, matrícula, admissão e salário vêm do seu cadastro na empresa — para corrigir, fale com o RH. Telefone, endereço e dados bancários você mesmo altera aqui (a correção fica só nesta jornada, não reescreve a base).</p>' +
+
+        '<fieldset><legend>Dados pessoais</legend><div class="grid form">' +
+          (isMissing('sex') ? formField('sex', 'Sexo', selectInput('sex', f.sex, Object.entries(SEX_LABEL), true), true) : '') +
+          formField('nationality', 'Nacionalidade', selectInput('nationality', f.nationality || 'BRAZILIAN', Object.entries(NATIONALITY_LABEL), false), true) +
+          formField('motherName', 'Nome da mãe', textInput('motherName', f.motherName), true) +
+          formField('maritalStatus', 'Estado civil', selectInput('maritalStatus', f.maritalStatus, Object.entries(MARITAL_STATUS_LABEL), true), true) +
+          formField('pep', 'Pessoa politicamente exposta (PEP)?', selectInput('pep', typeof f.pep === 'boolean' ? (f.pep ? 'sim' : 'nao') : '', [['nao', 'Não'], ['sim', 'Sim']], true), true) +
+        '</div></fieldset>' +
+
+        '<fieldset><legend>Documento de identificação</legend><div class="grid form">' +
+          formField('documentType', 'Tipo de documento', selectInput('documentType', f.documentType || 'RG', [['RG', 'RG'], ['CNH', 'CNH'], ['CIN', 'CIN']], false), true) +
+          formField('documentNumber', 'Número do documento', textInput('documentNumber', f.documentNumber), true) +
+          formField('documentState', 'UF emissora', textInput('documentState', f.documentState, ' style="text-transform:uppercase"'), true) +
+          formField('documentIssuer', 'Órgão emissor', textInput('documentIssuer', f.documentIssuer), true) +
+          formField('documentIssueDate', 'Data de emissão', textInput('documentIssueDate', f.documentIssueDate, ' type="date"'), true) +
+        '</div></fieldset>' +
+
+        '<fieldset><legend>Endereço</legend><div class="grid form">' +
+          formField('city', 'Cidade', textInput('city', f.city), true) +
+          formField('state', 'UF', textInput('state', f.state, ' style="text-transform:uppercase"'), true) +
+          formField('district', 'Bairro', textInput('district', f.district), true) +
+          '</div><p class="hint" id="cep-status"></p></fieldset>' +
+
+        '<fieldset><legend>Dados bancários complementares</legend><div class="grid form">' +
+          (bank530
+            ? '<p class="hint">Para o banco 530, o dígito da conta é calculado automaticamente a partir do número informado.</p>'
+            : formField('accountCheckDigit', 'Dígito da conta', textInput('accountCheckDigit', f.accountCheckDigit))) +
+          formField('branchCheckDigit', 'Dígito da agência', textInput('branchCheckDigit', f.branchCheckDigit)) +
+        '</div></fieldset>' +
+
+        '<fieldset><legend>Renda</legend><div class="grid form">' +
+          formField('otherIncome', 'Renda mensal adicional (R$)', textInput('otherIncome', f.otherIncome, ' inputmode="decimal"')) +
+        '</div></fieldset>' +
+
+        alertBox('erro-dados') +
+        '<button class="acao" type="submit" id="btn-dados">Continuar</button>' +
+      '</form>' +
+    '</div>'
+
+  for (const b of document.querySelectorAll('[data-bloco]')) {
+    b.onclick = () => {
+      const id = b.dataset.bloco
+      const editor = document.getElementById('edit-' + id)
+      const isOpen = !editor.classList.toggle('oculto')
+      document.getElementById('ver-' + id).classList.toggle('oculto', isOpen)
+      b.textContent = isOpen ? 'Concluir' : 'Alterar'
+    }
+  }
+
+  // Busca o endereco pelo CEP no proxy server-side da API — o navegador nunca fala com o ViaCEP.
+  const postalCodeInput = document.getElementById('correctedPostalCode')
+  postalCodeInput.oninput = async () => {
+    const d = postalCodeInput.value.replace(/\D/g, '').slice(0, 8)
+    postalCodeInput.value = d
+    const status = document.getElementById('cep-status')
+    if (d.length !== 8) return
+    status.textContent = 'Buscando endereço pelo CEP…'
+    try {
+      const e = await api('GET', '/postal-codes/' + d)
+      status.textContent = ''
+      // ViaCEP devolve bairro e rua maiores que o limite da Funcao: corta no maxlength do campo.
+      const fill = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = el.maxLength > 0 ? v.slice(0, el.maxLength) : v }
+      fill('correctedStreet', e.street)
+      fill('district', e.district)
+      fill('city', e.city)
+      fill('state', e.state)
+    } catch (err) {
+      status.textContent = err.code === 'CEP_NOT_FOUND'
+        ? 'CEP não encontrado — preencha os campos manualmente.'
+        : 'Não foi possível consultar o CEP agora — preencha os campos manualmente.'
+    }
+  }
+
+  // Continuar so grava: o envio a Funcao sai da tela seguinte, por clique explicito.
+  const form = document.getElementById('form-dados')
+  form.onsubmit = (ev) => {
+    ev.preventDefault()
+    withButton(document.getElementById('btn-dados'), 'Salvando…', async () => {
+      clearError('erro-dados')
+      const id = S.proposalId
+      try {
+        const r = await api('PATCH', '/proposals/' + id + '/customer-data', buildSupplementPayload(readForm(form)))
+        if (!r.complete) {
+          if (isCurrent()) showError('erro-dados', 'Complete os campos: ' + r.missingFields.map((c) => FIELD_LABEL[c] || c).join(', ') + '.')
+          return
+        }
+        route(await loadProposal(id), isCurrent)
+      } catch (err) {
+        if (isCurrent()) showError('erro-dados', err.message)
+      }
+    })
+  }
+}
+
+/* ------------------------------------------------------------- 4 · Envio */
+
+function reviewScreen(isCurrent) {
+  const p = S.proposal
+  if (!p) return restart()
+  app.innerHTML = '<div class="card"><p class="hint">Carregando sua proposta…</p></div>'
+
+  api('GET', '/proposals/' + S.proposalId + '/customer-data')
+    .then((view) => { if (isCurrent()) paintReview(p, view, isCurrent) })
+    .catch((err) => { if (isCurrent()) app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div></div>' })
+}
+
+function paintReview(p, view, isCurrent) {
+  const k = view.known
+  const f = view.supplement || {}
+  const o = p.offers.find((x) => x.offerId === p.selectedOfferId)
+  // Com o #recusa na tela, o erro do envio vai nele: é o texto da Função que diz o que corrigir.
+  const commandMessage = takeNotice()
+
+  app.innerHTML =
+    '<div class="card" id="envio">' +
+      '<div class="cab-card"><h1>Revise e envie</h1>' + tagStatus(p.status) + '</div>' +
+      (p.status === 'ERROR' ? '<div class="aviso erro" id="recusa">' + esc(commandMessage || 'A instituição não aceitou a proposta. Revise seus dados e envie de novo.') + '</div>' : '') +
+      alertBox('erro-envio', p.status === 'ERROR' ? null : commandMessage) +
+      '<h2>Condição escolhida</h2>' +
+      (o ? boxes([{ label: 'Valor liberado', value: brl(o.requestedAmount), highlight: true }]) + offerBoxes(o) : '') +
+      '<h2>Seus dados</h2>' +
+      boxes([
+        { label: 'Nome', value: k.name, wide: true },
+        { label: 'Telefone', value: formatPhone(k.phone) },
+        { label: 'Documento', value: [f.documentType, f.documentNumber].filter(Boolean).join(' ') || '—' },
+        { label: 'Endereço', value: addressText(k) || 'Não informado', wide: true },
+        { label: 'Dados bancários', value: bankText(k) || 'Não informado', wide: true },
+      ]) +
+      '<div class="aviso info">Ao enviar, você autoriza a inclusão da proposta junto ao parceiro bancário. O envio não significa que o crédito foi aprovado.</div>' +
+      '<button class="acao coral" id="btn-enviar">Enviar proposta</button><div style="height:10px"></div>' +
+      '<button class="acao sec" id="btn-alterar-dados">Alterar dados</button><div style="height:10px"></div>' +
+      '<button class="acao sec" id="btn-cancelar">Cancelar proposta</button>' +
+    '</div>'
+
+  document.getElementById('btn-alterar-dados').onclick = () => goToStep(3)
+  document.getElementById('btn-cancelar').onclick = (ev) => cancelProposal(ev.currentTarget, 'erro-envio', isCurrent)
+
+  // Erro no envio tambem segue o GET: condicao vencida volta re-simulada (Oferta) com a mensagem.
+  document.getElementById('btn-enviar').onclick = (ev) => withButton(ev.currentTarget, 'Enviando…', async () => {
+    clearError('erro-envio')
+    // Voltar ou Alterar dados no meio do envio deixavam o colaborador nos Dados de uma proposta enviada.
+    const locked = document.querySelectorAll('#envio button, #btn-voltar')
+    for (const b of locked) b.disabled = true
+    const id = S.proposalId
+    let message = null
+    try {
+      await api('POST', '/proposals/' + id + '/confirm', { offerId: p.selectedOfferId })
+    } catch (err) {
+      message = err.message
+    }
+    try {
+      route(await loadProposal(id), isCurrent, { message })
+    } catch (err) {
+      if (isCurrent()) showError('erro-envio', message || err.message)
+    } finally {
+      for (const b of locked) b.disabled = false
+    }
+  })
+}
+
+/* ------------------------------------------------------ 5 · Confirmação */
+
+let pollTimer = null
+let pollCount = 0
+let pollStatus = null
+
+/**
+ * Espera ate a proxima atualizacao automatica: 3 s no comeco (retry e inclusao costumam resolver
+ * em segundos), depois 15 s, e para. Desfecho desconhecido leva ate ~30 min na conciliacao
+ * automatica — polling sem fim so gastaria API. `null` = parou; o botao Atualizar segue funcionando.
+ */
+const nextPollDelay = (n) => (n < 10 ? 3000 : n < 30 ? 15000 : null)
+
+/**
+ * UC09 na visao do colaborador. "Em analise" e "iniciada" se atualizam sozinhos (com backoff); os
+ * demais status sao finais, entao param o polling. Incluida mantem o Atualizar: a esteira da Funcao
+ * segue mudando depois da inclusao.
+ */
+function trackingScreen(isCurrent) {
+  clearTimeout(pollTimer)
+  const p = S.proposal
+  if (!p) return restart()
+  if (p.status !== pollStatus) { pollCount = 0; pollStatus = p.status }
+
+  const isFinal = ['SUBMITTED', 'INELIGIBLE', 'REJECTED', 'ERROR', 'CANCELLED'].includes(p.status)
+  const delay = isFinal ? null : nextPollDelay(pollCount)
+  const sent = wasSent(p)
+  const step = p.currentStep
+  app.innerHTML =
+    '<div class="card" id="acompanhamento">' +
+      '<div class="cab-card"><h1>' + (sent ? 'Proposta enviada' : 'Acompanhe sua proposta') + '</h1>' + tagStatus(p.status) + '</div>' +
+      (STATUS_MESSAGE[p.status] ? '<div class="aviso ' + (['ERROR', 'REJECTED', 'INELIGIBLE'].includes(p.status) ? 'erro' : 'info') + '" id="mensagem">' + esc(STATUS_MESSAGE[p.status]) + '</div>' : '') +
+      boxes([
+        // O "Acompanhar" nao lista inelegivel: o ID nao serviria para nada.
+        ...(p.status === 'INELIGIBLE' ? [] : [{ label: 'ID de acompanhamento', value: p.proposalId, highlight: true, sub: 'Use em "Acompanhar minhas propostas" ou ao falar com o RH.' }]),
+        ...(p.proposalNumber ? [{ label: 'Número da proposta na Função', value: p.proposalNumber }] : []),
+      ]) +
+      pipelineBox(p.pipeline) +
+      paintTrail(p) +
+      (step ? boxes([{ label: 'Etapa atual', value: (STEP_LABEL[step.step] || step.step) + ' — ' + (STEP_STATUS_LABEL[step.status] || step.status) }]) : '') +
+      (p.retryScheduledAt ? '<p class="hint">Tentaremos de novo automaticamente às ' + esc(new Date(p.retryScheduledAt).toLocaleTimeString('pt-BR')) + '. Você não precisa refazer nada.</p>' : '') +
+      (sent ? '<div class="aviso info">O envio não significa que o crédito foi aprovado. A análise e a decisão são da instituição financeira.</div>' : '') +
+      (!isFinal && delay === null ? '<p class="hint" id="poll-parado">Atualização automática pausada. Toque em Atualizar para ver o status.</p>' : '') +
+      alertBox('erro-acomp', takeNotice()) +
+      (isFinal && p.status !== 'SUBMITTED' ? '' : '<button class="acao sec" id="btn-atualizar">Atualizar</button><div style="height:10px"></div>') +
+      '<button class="acao" id="btn-nova">Nova consulta</button>' +
+    '</div>'
+
+  document.getElementById('btn-nova').onclick = () => { clearTimeout(pollTimer); restart() }
+  const refresh = async () => {
+    try { route(await loadProposal(), isCurrent) } catch { /* rede: o proximo ciclo (ou o botao) tenta de novo */ }
+  }
+  const btn = document.getElementById('btn-atualizar')
+  if (btn) btn.onclick = () => { pollCount = 0; refresh() }
+  if (delay !== null) {
+    pollCount++
+    pollTimer = setTimeout(() => { if (isCurrent()) refresh() }, delay)
+  }
+}
+
+/* ================================================================== ADMIN */
+
+/**
+ * Portal do backoffice — mesma pagina, em /admin/ ou #admin.
+ *
+ * So acompanhamento: propostas, origens e funcionarios. Nenhuma tela age sobre proposta — quem a
+ * conduz e o colaborador. ATENCAO: a API nao tem nenhum guard; quem alcanca a porta 3010 le tudo
+ * isto. Enquanto nao houver perfil de acesso, esta rota so deve existir em rede de desenvolvimento.
+ */
+// So vinculos sao lote (planilha unica, via bucket). Canais e filiais nao sao lote: sao cadastro,
+// mostrado (so leitura) na aba "Configuracoes".
+const DATASETS = {
+  EMPLOYMENT: { label: 'Vínculos', path: '/admin/employees/batches' },
+}
+// Vocabulario do operador: amarelo enquanto le, verde quando vigente, vermelho com o motivo.
+const BATCH_STATUS_LABEL = {
+  PROCESSING: 'Processando',
+  PUBLISHED: 'Processado',
+  SUPERSEDED: 'Substituído',
+  REJECTED: 'Erro',
+}
+const batchStatusLabel = (s) => BATCH_STATUS_LABEL[s] || s
+const DATASET_OPTIONS = Object.entries(DATASETS).map(([k, v]) => [k, v.label])
+const DATASET_LABEL = Object.fromEntries(DATASET_OPTIONS)
+
+/**
+ * Backoffice e operacao (proposta e funcionario); Developer e bastidor (outbox, DLQ, carga de lote).
+ * As duas visoes sao o mesmo portal com abas diferentes; cada uma lembra a sua aba.
+ */
+const PORTAL_TABS = {
+  admin: [['propostas', 'Propostas'], ['funcionarios', 'Funcionários'], ['configuracoes', 'Configurações']],
+  dev: [['filas', 'Filas'], ['dlq', 'DLQ'], ['lotes', 'Lotes'], ['funcao', 'Função']],
+}
+const portalTab = { admin: 'propostas', dev: 'filas' }
+let portalMode = 'admin'
+
+
+function formatDateTime(iso) {
+  return iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+}
+
+function renderAdmin() {
+  document.getElementById('btn-voltar').classList.add('oculto')
+
+  clearTimeout(queuesTimer)
+  const tab = portalTab[portalMode]
+  document.getElementById('stepper').innerHTML = PORTAL_TABS[portalMode]
+    .map(([id, label]) => '<button class="aba' + (tab === id ? ' ativa' : '') + '" data-aba="' + id + '">' + label + (id === 'dlq' ? '<span class="badge oculto" id="dlq-contagem"></span>' : '') + '</button>').join('')
+  for (const b of document.querySelectorAll('[data-aba]')) {
+    b.onclick = () => { portalTab[portalMode] = b.dataset.aba; renderAdmin() }
+  }
+  if (portalMode === 'dev') notifyDlq()
+
+  const isCurrent = newScreen()
+  if (tab === 'propostas') proposalsScreen(isCurrent)
+  else if (tab === 'filas') queuesScreen(isCurrent)
+  else if (tab === 'dlq') dlqScreen(isCurrent)
+  else if (tab === 'lotes') batchesScreen(isCurrent)
+  else if (tab === 'funcao') funcaoScreen(isCurrent)
+  else if (tab === 'funcionarios') employeesScreen(isCurrent)
+  else settingsScreen(isCurrent)
+}
+
+// Lista da DLQ paginada; a contagem vem do `meta.total`, exata.
+const DLQ_PER_PAGE = 50
+
+/** A "notificacao" de DLQ no portal: contagem na aba, sempre que o portal e aberto ou troca de aba. */
+function notifyDlq() {
+  api('GET', '/admin/proposals?dlq=true&pageSize=1').then((r) => {
+    const el = document.getElementById('dlq-contagem')
+    if (!el || r.meta.total === 0) return
+    el.textContent = String(r.meta.total)
+    el.classList.remove('oculto')
+  }).catch(() => { /* a aba continua funcionando sem a contagem */ })
+}
+
+/* -------------------------------------------------------- Propostas / DLQ */
+
+/** Rotulo pt-BR com o codigo cru no `title`: a lista fica limpa e o suporte ve o codigo no hover. */
+const titledLabel = (labels, value) => '<span title="' + esc(value) + '">' + esc(labelOf(labels, value)) + '</span>'
+
+/** Quem abriu a proposta; o nome abre a ficha. Sem matricula: nao chegou a escolher vinculo (inelegivel, indisponivel). */
+const employeeCell = (c) => c
+  ? '<button class="link" data-funcionario="' + esc(c.id) + '">' + esc(c.name) + '</button>' +
+    '<span class="sub">' + esc(c.cpf) + (c.employeeNumber ? ' · mat. ' + esc(c.employeeNumber) : '') + '</span>'
+  : '<span class="sub">CPF fora da base vigente</span>'
+
+/** Status da spec e, embaixo, a etapa corrente; a tentativa so aparece quando ja houve retry. */
+function statusCell(p) {
+  const e = p.currentStep
+  return '<span title="' + esc(labelCodeText(INTERNAL_STATUS_LABEL, p.internalStatus)) + '">' + tagStatus(p.status) + '</span>' +
+    (e ? '<span class="sub">' + esc(STEP_LABEL[e.step] || e.step) + ' · ' + esc(stepStatusLabel(e.status)) + (e.attempt > 1 ? ' · ' + esc(e.attempt) + 'ª tentativa' : '') + '</span>' : '')
+}
+
+/** So o que existe: motivo, DLQ, retry agendado e, nas incluidas, a esteira (preenchida depois). */
+function detailCell(p) {
+  const lines = [
+    p.reasonCode && titledLabel(REASON_LABEL, p.reasonCode),
+    p.dlq && '<span class="tag REJECTED">DLQ</span>' + (p.dlq.reason && p.dlq.reason !== p.reasonCode ? ' ' + titledLabel(REASON_LABEL, p.dlq.reason) : ''),
+    p.retryScheduledAt && '<span class="sub">Retry em ' + esc(formatDateTime(p.retryScheduledAt)) + '</span>',
+    p.internalStatus === 'PROPOSAL_CREATED' && '<span class="sub" data-esteira="' + esc(p.proposalId) + '">Função: …</span>',
+  ].filter(Boolean)
+  return lines.map((l) => '<div>' + l + '</div>').join('')
+}
+
+function proposalRow(p) {
+  return '<tr data-proposta="' + esc(p.proposalId) + '">' +
+    '<td>' + employeeCell(p.employee) + '</td>' +
+    '<td>' + statusCell(p) + '</td>' +
+    '<td>' + detailCell(p) + '</td>' +
+    '<td>' + (p.proposalNumber ? 'Nº ' + esc(p.proposalNumber) : '<code>' + esc(p.proposalId.slice(0, 8)) + '</code>') + '<span class="sub">' + esc(formatDateTime(p.updatedAt)) + '</span></td>' +
+    '<td><button class="alterar" data-historico="' + esc(p.proposalId) + '">Histórico</button></td>' +
+  '</tr>'
+}
+
+function proposalsTable(list, emptyText) {
+  return list.length
+    ? '<table class="tbl lista" id="tbl-propostas"><thead><tr>' +
+      '<th>Colaborador</th><th>Status</th><th>Detalhe</th><th>Proposta</th><th></th>' +
+      '</tr></thead><tbody>' + list.map(proposalRow).join('') + '</tbody></table>'
+    : '<p class="hint">' + emptyText + '</p>'
+}
+
+function bindHistory() {
+  for (const b of document.querySelectorAll('[data-historico]')) {
+    b.onclick = () => historyScreen(b.dataset.historico)
+  }
+  // A ficha aberta da lista volta para a aba de onde saiu.
+  for (const b of document.querySelectorAll('[data-funcionario]')) {
+    b.onclick = () => employeeScreen(b.dataset.funcionario, renderAdmin)
+  }
+  // Situacao na esteira so das incluidas, depois de a lista aparecer: a Funcao lenta nao segura a
+  // tela. Celula ja fora da tela recebe o texto e ninguem ve. ponytail: uma consulta por incluida
+  // da pagina (ate 50, em paralelo); gravar a situacao no banco (catalogo §4.1) se a lista crescer.
+  for (const el of document.querySelectorAll('[data-esteira]')) {
+    api('GET', '/admin/proposals/' + encodeURIComponent(el.dataset.esteira)).then((h) => {
+      const e = h.pipeline
+      // A lista vem do status gravado; o detalhe ja traz o da esteira (withPipeline na API).
+      const tag = el.closest('tr') && el.closest('tr').querySelector('[data-status]')
+      if (tag && h.status !== tag.dataset.status) tag.outerHTML = tagStatus(h.status)
+      el.textContent = 'Função: ' + (e
+        ? (PIPELINE_STATUS_LABEL[e.status] || e.status) + (e.activityDescription ? ' · ' + e.activityDescription : '')
+        : 'sem resposta')
+    }).catch(() => { el.textContent = 'Função: sem resposta' })
+  }
+}
+
+/** Rodape de lista paginada (`meta` da API): faixa exibida e Anterior/Proxima. */
+function pager(meta, prefix) {
+  const { page, pageSize, total } = meta
+  const lastPage = Math.max(1, Math.ceil(total / pageSize))
+  return '<div class="cab-card" style="margin-top:12px">' +
+    '<span class="hint" style="margin:0">' + ((page - 1) * pageSize + 1) + '–' + Math.min(page * pageSize, total) + ' de ' + total + '</span>' +
+    '<span>' +
+      '<button class="acao sec" style="width:auto;padding:8px 16px" id="' + prefix + '-anterior"' + (page <= 1 ? ' disabled' : '') + '>Anterior</button> ' +
+      '<button class="acao sec" style="width:auto;padding:8px 16px" id="' + prefix + '-proxima"' + (page >= lastPage ? ' disabled' : '') + '>Próxima</button>' +
+    '</span>' +
+  '</div>'
+}
+
+/** Liga o pager pintado; `go(page)` busca a pagina pedida. */
+function bindPager(prefix, page, go) {
+  const prev = document.getElementById(prefix + '-anterior')
+  if (!prev) return
+  prev.onclick = () => go(page - 1)
+  document.getElementById(prefix + '-proxima').onclick = () => go(page + 1)
+}
+
+/** Filtros: so os preenchidos (vazio quebraria a validacao de enum/data na API). */
+const filled = (f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v))
+const queryFiltros = (f) => new URLSearchParams(filled(f)).toString()
+
+const filterOptions = (allLabel, labels) => '<option value="">' + allLabel + '</option>' +
+  Object.entries(labels).map(([v, r]) => '<option value="' + esc(v) + '">' + esc(r) + '</option>').join('')
+
+/** Fecha a linha de filtros, alinhado com os campos. `type="button"` para nao submeter o form. */
+const clearButton = (id) => '<button type="button" class="acao sec" id="' + id + '" style="flex:0 0 160px;align-self:flex-end">Limpar filtros</button>'
+
+const PROPOSALS_PER_PAGE = 50
+
+function proposalsScreen(isCurrent) {
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Propostas</h1>' +
+      '<p class="hint">Status na visão do colaborador e a etapa em que cada uma está; passe o mouse no status ou no motivo para ver o código interno. Para dar suporte, busque pelo CPF ou abra o histórico pelo id que o colaborador informar.</p>' +
+      '<div class="linha" style="margin-bottom:14px">' +
+        '<input id="busca-id" placeholder="id da proposta (uuid)" spellcheck="false">' +
+        '<button class="acao" id="btn-busca" style="flex:0 0 160px">Abrir histórico</button>' +
+      '</div>' +
+      alertBox('erro-busca') +
+      '<div class="linha" id="filtros-propostas" style="margin-bottom:14px">' +
+        formField('f-cpf', 'CPF', '<input id="f-cpf" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00">') +
+        formField('f-status', 'Status', '<select id="f-status">' + filterOptions('Todos', STATUS_LABEL) + '</select>') +
+        formField('f-step', 'Etapa atual', '<select id="f-step">' + filterOptions('Todas', STEP_LABEL) + '</select>') +
+        formField('f-from', 'Criadas de', '<input type="date" id="f-from">') +
+        formField('f-to', 'Até', '<input type="date" id="f-to">') +
+        clearButton('limpar-propostas') +
+      '</div>' +
+      '<div id="stats-propostas"></div>' +
+      '<p class="hint">Contagem por status no período e etapa filtrados; status e CPF valem só para a lista.</p>' +
+      '<div id="lista-propostas"><p class="hint">Carregando…</p></div>' +
+    '</div>'
+
+  document.getElementById('btn-busca').onclick = () => {
+    const id = document.getElementById('busca-id').value.trim()
+    if (id) historyScreen(id)
+  }
+
+  // Filtro trocado rapido: so a resposta da ultima troca pinta a tela. Filtro novo volta a pagina 1.
+  let requestSeq = 0
+  let page = 1
+  const load = () => {
+    const mine = ++requestSeq
+    const current = () => isCurrent() && mine === requestSeq
+    const value = (id) => document.getElementById(id).value
+    const f = { step: value('f-step'), from: value('f-from'), to: value('f-to') }
+    clearError('erro-busca')
+    api('GET', '/admin/proposals/stats?' + queryFiltros(f)).then((s) => {
+      if (!current()) return
+      document.getElementById('stats-propostas').innerHTML = boxes([
+        { label: 'Total', value: s.total, highlight: true },
+        ...s.byStatus.map((p) => ({ label: STATUS_LABEL[p.status] || p.status, value: p.count, sub: p.percentage.toLocaleString('pt-BR') + '%' })),
+      ])
+    }).catch((err) => { if (current()) showError('erro-busca', err.message) })
+    const cpf = value('f-cpf').replace(/\D/g, '')
+    if (cpf && cpf.length !== 11) return showError('erro-busca', 'Informe os 11 dígitos do CPF.')
+    const listFilters = filled({ page, pageSize: PROPOSALS_PER_PAGE, status: value('f-status'), ...f })
+    // CPF no corpo, nunca na URL (RF-SEC-001): com CPF a lista vem do POST de leitura.
+    const list = cpf
+      ? api('POST', '/admin/proposals/lookup', { cpf, ...listFilters })
+      : api('GET', '/admin/proposals?' + new URLSearchParams(listFilters))
+    list.then((r) => {
+      if (!current()) return
+      document.getElementById('lista-propostas').innerHTML = proposalsTable(r.proposals, 'Nenhuma proposta com esses filtros.') +
+        (r.proposals.length ? pager(r.meta, 'prop') : '')
+      bindHistory()
+      bindPager('prop', r.meta.page, (n) => { page = n; load() })
+    }).catch((err) => { if (current()) showError('erro-busca', err.message) })
+  }
+  const filters = ['f-cpf', 'f-status', 'f-step', 'f-from', 'f-to']
+  for (const id of filters) document.getElementById(id).onchange = () => { page = 1; load() }
+  // CPF aplica no Enter (o blur dispara o `change`) ou ao sair do campo.
+  const cpfInput = document.getElementById('f-cpf')
+  cpfInput.oninput = () => { cpfInput.value = maskCpf(cpfInput.value) }
+  cpfInput.onkeydown = (ev) => { if (ev.key === 'Enter') cpfInput.blur() }
+  document.getElementById('limpar-propostas').onclick = () => {
+    for (const id of filters) document.getElementById(id).value = ''
+    page = 1
+    load()
+  }
+  load()
+}
+
+/** "Notificado quando uma proposta cair em DLQ": a aba mostra a contagem e esta e a fila. */
+function dlqScreen(isCurrent, page = 1) {
+  app.innerHTML = '<div class="card"><p class="hint">Carregando…</p></div>'
+  api('GET', '/admin/proposals?dlq=true&pageSize=' + DLQ_PER_PAGE + '&page=' + page).then((r) => {
+    if (!isCurrent()) return
+    app.innerHTML =
+      '<div class="card" id="dlq">' +
+        '<h1>Falhas definitivas (DLQ)</h1>' +
+        '<p class="hint">Propostas em erro definitivo: retentativas esgotadas ou rejeição da Função. São alçada do backoffice — confira o histórico e trate com o colaborador. A matrícula já está livre: uma nova simulação abre outra proposta.</p>' +
+        proposalsTable(r.proposals, 'Nenhuma proposta na DLQ.') +
+        (r.proposals.length ? pager(r.meta, 'dlq') : '') +
+      '</div>'
+    bindHistory()
+    bindPager('dlq', r.meta.page, (n) => dlqScreen(newScreen(), n))
+  }).catch((err) => {
+    if (!isCurrent()) return
+    app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div></div>'
+  })
+}
+
+/* ------------------------------------------------------------------ Filas */
+
+/**
+ * O que esta em background agora, a partir da mesma lista do backoffice: fila de retry do outbox
+ * (falha transitoria com reprocessamento agendado), inclusoes em curso ou esperando conciliacao,
+ * cadastros parados e DLQ. Agrupar e contar, nunca somar valor.
+ */
+function queuesSummary(list) {
+  const byStatus = {}
+  for (const p of list) byStatus[p.internalStatus] = (byStatus[p.internalStatus] || 0) + 1
+  return {
+    total: list.length,
+    retry: list.filter((p) => p.retryScheduledAt).sort((a, b) => (a.retryScheduledAt < b.retryScheduledAt ? -1 : 1)),
+    // Erro retentavel SEM evento no outbox: ninguem vai reprocessar sozinho (conciliacao "nao criada",
+    // falha nao transitoria da inclusao). Depende do colaborador reconfirmar ou cancelar.
+    stalled: list.filter((p) => p.internalStatus === 'ERROR_RETRYABLE' && !p.retryScheduledAt),
+    submitting: list.filter((p) => p.internalStatus === 'SUBMITTING'),
+    awaitingData: list.filter((p) => p.internalStatus === 'CONDITION_SELECTED'),
+    dlq: list.filter((p) => p.dlq),
+    byInternalStatus: Object.entries(byStatus).sort((a, b) => b[1] - a[1]),
+  }
+}
+
+let queuesTimer = null
+// ponytail: amostra das 200 propostas mais recentes (teto do GET /admin/proposals). Um evento de
+// outbox mais antigo que isso nao aparece aqui — pede um endpoint de fila (ver relatorio).
+const QUEUE_SAMPLE = 200
+const QUEUES_REFRESH_MS = 5000
+
+/** `vigente` e o da aba: o refresh so repinta (e so religa o timer) enquanto a aba Filas e a tela. */
+function queuesScreen(isCurrent) {
+  clearTimeout(queuesTimer)
+  if (!document.getElementById('filas')) app.innerHTML = '<div class="card"><p class="hint">Carregando…</p></div>'
+  const reschedule = () => { queuesTimer = setTimeout(() => { if (isCurrent()) queuesScreen(isCurrent) }, QUEUES_REFRESH_MS) }
+  // A DLQ vem da propria consulta filtrada: na amostra das recentes ela sairia subcontada.
+  Promise.all([
+    api('GET', '/admin/proposals?pageSize=' + QUEUE_SAMPLE),
+    api('GET', '/admin/proposals?dlq=true&pageSize=' + QUEUE_SAMPLE),
+  ]).then(([r, dlq]) => {
+    if (!isCurrent()) return
+    const f = queuesSummary(r.proposals)
+    f.dlq = dlq.proposals
+    const dlqTotal = String(dlq.meta.total)
+    const section = (title, list, emptyText, hint) =>
+      '<h2 style="margin-top:18px">' + title + ' (' + list.length + ')</h2>' + (hint ? '<p class="hint">' + hint + '</p>' : '') + proposalsTable(list, emptyText)
+    app.innerHTML =
+      '<div class="card" id="filas">' +
+        '<h1>Filas em background</h1>' +
+        '<p class="hint">A saga grava cada etapa em <code>proposal_step</code>; falha transitória grava a etapa e um evento no <code>outbox_event</code> na mesma transação. O worker do próprio processo (<code>@Cron</code> a cada 5 s) reserva os eventos vencidos com <code>FOR UPDATE SKIP LOCKED</code> e retoma a saga do ponto em que parou, com backoff exponencial. Esgotou <code>RETRY_MAX_ATTEMPTS</code> = DLQ.</p>' +
+        '<p class="hint" id="filas-atualizacao">Atualiza a cada 5 s · última às ' + esc(new Date().toLocaleTimeString('pt-BR')) + '</p>' +
+        boxes([
+          { label: 'Retry agendado', value: f.retry.length, highlight: true },
+          { label: 'Erro sem retry', value: f.stalled.length },
+          { label: 'Inclusão em curso / conciliação', value: f.submitting.length },
+          { label: 'Aguardando cadastro', value: f.awaitingData.length },
+          { label: 'DLQ', value: dlqTotal },
+        ]) +
+        '<p class="hint">Amostra: as ' + f.total + ' propostas mais recentes. Por estado interno: ' +
+          f.byInternalStatus.map(([st, n]) => esc(labelOf(INTERNAL_STATUS_LABEL, st)) + ' <code>' + esc(st) + '</code> ' + n).join(' · ') + '</p>' +
+        section('Fila de retry (outbox)', f.retry, 'Nenhum reprocessamento agendado.',
+          'Falha que com certeza não chegou à Função (rede, token). O worker reprocessa sozinho no horário da coluna Retry — nada a fazer.') +
+        section('Erro sem retry agendado', f.stalled, 'Nenhuma proposta parada em erro.',
+          'ERROR_RETRYABLE sem evento no outbox (conciliação "não criada" ou falha não transitória da inclusão): ninguém reprocessa sozinho. O colaborador reconfirma ou cancela pela tela dele.') +
+        section('Inclusão em curso ou desfecho desconhecido', f.submitting, 'Nenhuma inclusão em andamento.',
+          'SUBMITTING: a chamada está no ar, ou deu timeout e a Função pode ter criado a proposta. Desfecho desconhecido nunca é reenviado às cegas: o serviço procura a proposta na Função a cada minuto e concilia sozinho.') +
+        section('Aguardando cadastro do colaborador', f.awaitingData, 'Nenhuma proposta parada no cadastro.',
+          'Cliente PF incompleto (RN07): depende do colaborador completar os dados e confirmar de novo.') +
+        '<h2 style="margin-top:18px">DLQ (' + dlqTotal + ')</h2>' +
+        '<p class="hint">Lista completa na aba DLQ. Não há reprocessamento de DLQ pela API: a matrícula já está livre, e o colaborador refaz a simulação pelo CPF.</p>' +
+      '</div>'
+    bindHistory()
+    reschedule()
+  }).catch((err) => {
+    if (!isCurrent()) return
+    // Falha de rede nao derruba o refresh em silencio: avisa e continua tentando no mesmo ritmo.
+    const line = document.getElementById('filas-atualizacao')
+    const msg = 'Falha ao atualizar (' + err.message + '). Nova tentativa em 5 s.'
+    if (line) { line.textContent = msg; line.classList.add('fail') }
+    else app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(msg) + '</div></div>'
+    reschedule()
+  })
+}
+
+/* --------------------------------------------------------------- Histórico */
+
+/**
+ * Desfecho desconhecido da inclusao: SUBMITTING com a etapa INCLUSION parada em
+ * PROPOSAL_OUTCOME_UNKNOWN. O servico concilia sozinho na Funcao; SUBMITTING sem esse marcador e
+ * chamada em curso.
+ */
+const awaitsReconciliation = (h) => h.internalStatus === 'SUBMITTING' &&
+  h.steps.some((e) => e.step === 'INCLUSION' && e.status === 'PENDING' && e.reasonCode === 'PROPOSAL_OUTCOME_UNKNOWN')
+
+/**
+ * O que esta acontecendo com a proposta, em linguagem de suporte. So leitura: o backoffice nao age
+ * sobre proposta — quem conduz e o colaborador, e o desfecho desconhecido se resolve sozinho.
+ */
+function supportNote(h) {
+  if (awaitsReconciliation(h)) return 'Desfecho desconhecido: o envio não teve resposta. O serviço procura a proposta na Função a cada minuto — achou, vira incluída; sem sinal dela em 30 minutos, volta ao colaborador para reenviar.'
+  if (h.internalStatus === 'FAILED_PERMANENT') return 'DLQ: não há reprocessamento. A matrícula já está livre — uma nova simulação pelo CPF abre outra proposta.'
+  if (h.internalStatus === 'ERROR_RETRYABLE') return h.status === 'UNDER_REVIEW'
+    ? 'Retry agendado no outbox: o worker reprocessa sozinho.'
+    : 'Falha sem retry agendado: o colaborador tenta de novo ou cancela pela tela dele.'
+  if (h.internalStatus === 'UNAVAILABLE') return 'Indisponível por dado de referência: confira se há lote de vínculos vigente (Developer › Lotes; a planilha chega pela caixa de entrada do bucket) ou se a filial está cadastrada (aba Configurações); a proposta volta a andar quando o colaborador refizer a simulação pelo CPF.'
+  if (h.internalStatus === 'SUBMITTING') return 'Inclusão em curso na Função.'
+  return ''
+}
+
+function historyScreen(id) {
+  clearTimeout(queuesTimer)
+  const isCurrent = newScreen()
+  app.innerHTML = '<div class="card"><p class="hint">Carregando histórico…</p></div>'
+  api('GET', '/admin/proposals/' + encodeURIComponent(id)).then((h) => {
+    if (!isCurrent()) return
+    const table = (headers, rows) => rows.length
+      ? '<div class="rolagem"><table class="tbl"><thead><tr>' + headers.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
+      : '<p class="hint">Nada registrado.</p>'
+    const c = h.employee
+    app.innerHTML =
+      '<div class="card" id="historico" data-proposta="' + esc(h.proposalId) + '">' +
+        '<div class="cab-card"><h1>Proposta ' + (h.proposalNumber ? 'nº ' + esc(h.proposalNumber) : '<code>' + esc(h.proposalId.slice(0, 8)) + '</code>') + '</h1>' + tagStatus(h.status) + '</div>' +
+        boxes([
+          { label: 'Número na Função', value: orDash(h.proposalNumber) },
+          { label: 'Id', value: h.proposalId },
+          { label: 'Colaborador', value: c ? c.name : 'fora da base vigente', sub: c && c.cpf },
+          { label: 'Matrícula', value: orDash(c && c.employeeNumber) },
+          { label: 'Empregador', value: orDash(c && c.tradeName) },
+          codeBox('Estado interno', INTERNAL_STATUS_LABEL, h.internalStatus),
+          codeBox('Motivo técnico', REASON_LABEL, h.reasonCode),
+        ]) +
+        pipelineBox(h.pipeline) +
+        (supportNote(h) ? '<div class="aviso info" id="orientacao">' + esc(supportNote(h)) + '</div>' : '') +
+        '<h2>Etapas da saga</h2>' +
+        table(['Etapa', 'Status', 'Tentativa', 'Motivo', 'Início', 'Fim'], h.steps.map((e) =>
+          '<tr data-etapa="' + esc(e.step) + '" data-etapa-status="' + esc(e.status) + '"><td>' + esc(STEP_LABEL[e.step] || e.step) + '</td><td>' + esc(stepStatusLabel(e.status)) + '</td><td class="num">' + esc(e.attempt) + '</td><td>' + reasonLabel(e.reasonCode) + '</td><td>' + esc(formatDateTime(e.startedAt)) + '</td><td>' + esc(formatDateTime(e.finishedAt)) + '</td></tr>')) +
+        '<h2 style="margin-top:18px">Reprocessamentos (outbox)</h2>' +
+        table(['Tipo', 'Leituras do worker', 'Disponível em', 'Processado', 'DLQ', 'Último erro'], h.retries.map((r) =>
+          '<tr><td>' + labelWithCode(EVENT_LABEL, r.type) + '</td><td class="num">' + esc(r.workerAttempts) + '</td><td>' + esc(formatDateTime(r.availableAt)) + '</td><td>' + esc(formatDateTime(r.processedAt)) + '</td><td>' + esc(formatDateTime(r.deadAt)) + '</td><td>' + reasonLabel(r.lastError) + '</td></tr>')) +
+        '<h2 style="margin-top:18px">Envios à Função</h2>' +
+        table(['Status', 'Proposta Função', 'Motivo (como a Função devolveu)', 'Em'], (h.submissions || []).map((s) =>
+          '<tr data-envio-status="' + esc(s.status) + '"><td>' + esc(stepStatusLabel(s.status)) + '</td><td>' + esc(s.proposalNumber || '—') + '</td><td>' + reasonLabel(s.errorCode) + '</td><td>' + esc(formatDateTime(s.createdAt)) + '</td></tr>')) +
+        '<div style="height:14px"></div>' +
+        '<div class="linha"><button class="acao sec" id="btn-voltar-lista">Voltar</button>' +
+        (c ? '<button class="acao" id="btn-ficha">Ver ficha do colaborador</button>' : '') + '</div>' +
+      '</div>'
+
+    document.getElementById('btn-voltar-lista').onclick = () => renderAdmin()
+    if (c) document.getElementById('btn-ficha').onclick = () => employeeScreen(c.id, () => historyScreen(id))
+  }).catch((err) => {
+    if (!isCurrent()) return
+    app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div><button class="acao sec" id="btn-voltar-lista">Voltar</button></div>'
+    document.getElementById('btn-voltar-lista').onclick = () => renderAdmin()
+  })
+}
+
+/* ------------------------------------------------------------ 1 · Lotes */
+
+/* ------------------------------------------------ Developer › Função (leitura no HML) */
+
+/**
+ * Bancada de teste das consultas de cadastro da Função: empregadores (Origem4), filiais (Origem5) e
+ * funcionário por CPF ou matrícula. Só leitura; o CPF vai no corpo e volta mascarado.
+ */
+function funcaoScreen(isCurrent) {
+  const input = (id, label, extra) => formField(id, label, '<input id="' + id + '" spellcheck="false"' + (extra || '') + '>')
+  const form = (id, fields) => '<form id="' + id + '" class="linha" style="margin-bottom:10px">' + fields + '<button class="acao" style="flex:0 0 120px">Buscar</button></form>'
+  app.innerHTML =
+    '<div class="card"><h1>Função — cadastro</h1><p class="hint">Consultas de leitura no ambiente da Função (HML). Sem filtro, lista a primeira página.</p>' +
+      alertBox('erro-funcao') + '</div>' +
+    '<div class="card"><h2>Empregadores (Origem4)</h2>' +
+      form('form-emp', input('fe-code', 'Código') + input('fe-desc', 'Descrição') + input('fe-cnpj', 'CNPJ') +
+        formField('fe-status', 'Situação', '<select id="fe-status"><option value="">Todas</option><option value="ACTIVE">Ativo</option><option value="INACTIVE">Inativo</option></select>')) +
+      '<div id="res-emp"></div></div>' +
+    '<div class="card"><h2>Filiais (Origem5)</h2>' +
+      form('form-fil', input('ff-code', 'Código') + input('ff-desc', 'Descrição') + input('ff-cnpj', 'CNPJ') + input('ff-emp', 'Origem4')) +
+      '<div id="res-fil"></div></div>' +
+    '<div class="card"><h2>Funcionários</h2><p class="hint">Por CPF ou matrícula; sem nenhum dos dois, lista o empregador.</p>' +
+      form('form-fun', input('fu-cpf', 'CPF') + input('fu-mat', 'Matrícula') + input('fu-emp', 'Origem4 (empregador)') + input('fu-fil', 'Origem5 (filial)')) +
+      '<div id="res-fun"></div></div>'
+
+  const val = (id) => document.getElementById(id).value.trim()
+  const run = (formId, resId, fetcher, render) => {
+    document.getElementById(formId).onsubmit = async (ev) => {
+      ev.preventDefault()
+      clearError('erro-funcao')
+      const target = document.getElementById(resId)
+      target.innerHTML = '<p class="hint">Consultando…</p>'
+      try {
+        const r = await fetcher()
+        if (isCurrent()) target.innerHTML = render(r)
+      } catch (err) {
+        if (isCurrent()) { target.innerHTML = ''; showError('erro-funcao', err.message) }
+      }
+    }
+  }
+  const table = (head, rows, r) => '<p class="hint">' + esc(r.total) + ' registro(s)' + (r.pages > 1 ? ' · ' + esc(r.pages) + ' páginas (mostrando a 1ª)' : '') + '</p>' +
+    (rows.length ? '<div class="rolagem"><table class="tbl"><thead><tr>' + head.map((h) => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
+      rows.map((c) => '<tr>' + c.map((x) => '<td>' + esc(x ?? '—') + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' : '')
+  const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v)).toString()
+
+  run('form-emp', 'res-emp', () => api('GET', '/admin/funcao/employers?' + qs({
+    code: val('fe-code'), description: val('fe-desc'), cnpj: val('fe-cnpj'), status: val('fe-status'),
+  })), (r) => table(['Código', 'Descrição', 'Situação'], r.origins.map((o) => [o.code, o.description, o.status && (FUNCAO_ORIGIN_STATUS_LABEL[o.status] || o.status)]), r))
+
+  run('form-fil', 'res-fil', () => api('GET', '/admin/funcao/branches?' + qs({
+    code: val('ff-code'), description: val('ff-desc'), cnpj: val('ff-cnpj'), employer: val('ff-emp'),
+  })), (r) => table(['Código', 'Descrição', 'CNPJ', 'Empregador'], r.origins.map((o) => [o.code, o.description, o.cnpj, o.employer ? o.employer.code + ' · ' + o.employer.description : null]), r))
+
+  run('form-fun', 'res-fun', () => api('POST', '/admin/employees/funcao/lookup', Object.fromEntries(Object.entries({
+    cpf: val('fu-cpf'), employeeNumber: val('fu-mat'), origin4: val('fu-emp'), origin5: val('fu-fil'),
+  }).filter(([, v]) => v))), (r) => table(['Nome', 'CPF', 'Matrícula', 'Situação', 'Admissão', 'Demissão', 'Filial'],
+    r.employees.map((e) => [e.name, e.cpf, e.employeeNumber, e.status && (FUNCAO_EMPLOYEE_STATUS_LABEL[e.status] || e.status), e.hireDate, e.terminationDate, e.origin5]), r))
+}
+
+// `vigente` da aba Lotes: a consulta de um lote recarrega a lista depois, quando a aba pode ja ter mudado.
+let batchesIsCurrent = () => false
+
+function batchesScreen(isCurrent) {
+  batchesIsCurrent = isCurrent
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Planilha de vínculos</h1>' +
+      '<p class="hint">O empregador deposita a planilha (.xlsx com as abas <strong>Ativos</strong> e <strong>DEMITIDOS</strong>, ou .csv único separado pela coluna SITUACAO) na caixa de entrada do bucket; o serviço a busca sozinho a cada ciclo e cria um lote. O lote fica <strong>Processando</strong> enquanto é lido e, ao terminar, vira <strong>Processado</strong> — vigente, no lugar do anterior — ou <strong>Erro</strong>, com o motivo. Linhas recusadas ficam no lote para consulta. Canais e filiais ficam na aba Configurações.</p>' +
+      alertBox('erro-lote') +
+      '<button class="acao" id="btn-atualizar">Atualizar lotes</button>' +
+    '</div>' +
+    '<div id="validacao"></div>' +
+    '<div class="card"><h2>Lotes</h2><div id="lista-lotes"><p class="hint">Carregando…</p></div></div>'
+
+  document.getElementById('btn-atualizar').onclick = () => {
+    clearError('erro-lote')
+    loadBatches()
+  }
+
+  loadBatches()
+}
+
+/** Consulta o lote ate ele sair de PROCESSING: o worker da caixa de entrada pode estar no meio dele. */
+async function watchBatch(batchId) {
+  const isCurrent = batchesIsCurrent
+  for (;;) {
+    let batch
+    try {
+      batch = await api('GET', DATASETS.EMPLOYMENT.path + '/' + batchId)
+    } catch (err) {
+      if (isCurrent()) showError('erro-lote', err.message)
+      return
+    }
+    if (!isCurrent()) return
+    paintBatchResult(batch)
+    if (batch.status !== 'PROCESSING') return loadBatches()
+    loadBatches()
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+}
+
+function paintBatchResult(r) {
+  document.getElementById('validacao').innerHTML =
+    '<div class="card" data-lote="' + esc(r.id) + '" data-status="' + esc(r.status) + '">' +
+      '<h2>Planilha <span class="tag ' + esc(r.status) + '">' + esc(batchStatusLabel(r.status)) + '</span></h2>' +
+      (r.errorMessage ? '<div class="aviso erro">' + esc(r.errorMessage) + '</div>' : '') +
+      boxes([
+        { label: 'Arquivo', value: r.filename },
+        { label: 'Linhas lidas', value: r.rowCount + r.rejectedCount },
+        { label: 'Linhas aceitas', value: r.rowCount, highlight: true },
+        { label: 'Linhas rejeitadas', value: r.rejectedCount },
+      ]) +
+      (r.rejections && r.rejections.length
+        ? '<div class="rolagem"><table class="tbl"><thead><tr><th>Linha</th><th>Campo</th><th>Motivo</th></tr></thead><tbody>' +
+          r.rejections.map((j) => '<tr><td class="num">' + (j.sheet ? esc(j.sheet) + ' · ' : '') + esc(j.line) + '</td><td>' + esc(j.field) + '</td><td>' + esc(j.reason) + '</td></tr>').join('') +
+          '</tbody></table></div>' +
+          // rejectedCount conta linhas e rejections, motivos (varios por linha): truncou se faltou linha
+          (new Set(r.rejections.map((j) => j.sheet + '|' + j.line)).size < r.rejectedCount ? '<p class="hint">Mostrando as primeiras ' + esc(r.rejections.length) + ' rejeições.</p>' : '')
+        : '') +
+    '</div>'
+}
+
+/**
+ * Lote vigente por base: o PUBLISHED mais recente. O banco ja garante um so por base (indice unico
+ * parcial em `employment_batch`); aqui e so para a tela dizer, por base, o que a elegibilidade e a
+ * resolucao de origem estao lendo — e gritar quando uma base nao tem lote vigente.
+ */
+function currentByDataset(batches) {
+  const r = {}
+  for (const base of Object.keys(DATASETS)) {
+    r[base] = batches
+      .filter((b) => b.dataset === base && b.status === 'PUBLISHED')
+      .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))[0] || null
+  }
+  return r
+}
+
+async function loadBatches() {
+  const isCurrent = batchesIsCurrent
+  const target = document.getElementById('lista-lotes')
+  try {
+    const { batches } = await api('GET', DATASETS.EMPLOYMENT.path)
+    if (!isCurrent()) return
+    batches.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    const currentBatches = currentByDataset(batches)
+    const withoutCurrent = Object.keys(currentBatches).filter((k) => !currentBatches[k])
+    target.innerHTML =
+      '<div class="grid" id="vigentes">' + Object.entries(currentBatches).map(([k, b]) =>
+        '<div class="box' + (b ? '' : ' destaque') + '" data-vigente="' + k + '"><div class="rot">' + esc(DATASET_LABEL[k]) + ' — vigente</div>' +
+        '<div class="val">' + (b ? esc(b.filename) + '<span class="sub">' + esc(b.rowCount + b.rejectedCount) + ' linhas lidas · ' + esc(b.rowCount) + ' aceitas · ' + esc(formatDateTime(b.publishedAt)) + '</span>' : '<span class="fail">Sem lote vigente</span>') + '</div></div>').join('') +
+      '</div>' +
+      (withoutCurrent.length ? '<div class="aviso erro">Sem lote vigente em ' + esc(withoutCurrent.map((k) => DATASET_LABEL[k]).join(', ') + '. Propostas que dependem dessa base ficam indisponíveis (erro para o colaborador) até a publicação.') + '</div>' : '') +
+      (batches.length
+      ? '<div class="rolagem"><table class="tbl"><thead><tr>' +
+        '<th>Base</th><th>Arquivo</th><th>Status</th><th>Lidas</th><th>Aceitas</th><th>Rejeitadas</th><th>Criado</th><th>Publicado por</th><th></th>' +
+        '</tr></thead><tbody>' +
+        batches.map((b) =>
+          '<tr>' +
+            '<td>' + esc(DATASET_LABEL[b.dataset] || b.dataset) + '</td>' +
+            '<td class="quebra">' + esc(b.filename) + '</td>' +
+            '<td><span class="tag ' + esc(b.status) + '">' + esc(batchStatusLabel(b.status)) + '</span>' + (currentBatches[b.dataset] === b ? '<span class="sub">vigente</span>' : '') + (b.errorMessage ? '<span class="sub fail">' + esc(b.errorMessage) + '</span>' : '') + '</td>' +
+            '<td class="num">' + esc(b.rowCount + b.rejectedCount) + '</td>' +
+            '<td class="num">' + esc(b.rowCount) + '</td>' +
+            '<td class="num">' + esc(b.rejectedCount) + '</td>' +
+            '<td>' + esc(formatDateTime(b.createdAt)) + '</td>' +
+            '<td>' + (b.publishedBy ? esc(b.publishedBy) + '<span class="sub">' + esc(formatDateTime(b.publishedAt)) + '</span>' : '—') + '</td>' +
+            '<td>' + (b.rejectedCount > 0 ? '<button class="alterar" data-detalhe="' + esc(b.id) + '">Ver rejeições</button>' : '') + '</td>' +
+          '</tr>').join('') +
+        '</tbody></table></div>'
+      : '<p class="hint">Nenhum lote importado ainda.</p>')
+    for (const b of document.querySelectorAll('[data-detalhe]')) {
+      b.onclick = (ev) => watchBatch(ev.currentTarget.dataset.detalhe)
+    }
+  } catch (err) {
+    if (isCurrent()) target.innerHTML = '<div class="aviso erro">' + esc(err.message) + '</div>'
+  }
+}
+
+/* ---------------------------------------------------------- Configuracoes */
+
+// Canais (Origem 4) e filiais (Origem 5) em uma tela so, somente leitura: o cadastro vem do seed e
+// a API nao tem rota de edicao nem remocao.
+const readOnlyTable = (headers, rows) =>
+  '<div class="rolagem"><table class="tbl"><thead><tr>' + headers.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>' +
+    rows.map((cells) => '<tr>' + cells.map((c) => '<td>' + esc(c || '—') + '</td>').join('') + '</tr>').join('') +
+  '</tbody></table></div>'
+
+function settingsScreen(isCurrent) {
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Configurações</h1>' +
+      alertBox('erro-config') +
+      '<h2>Canal (Origem 4)</h2>' +
+      '<p class="hint">Grupo empresarial pelo qual a venda entra na Função — o código vai como Origem 4 em toda simulação e proposta.</p>' +
+      '<div id="config-canais" class="hint">Carregando…</div>' +
+      '<h2 style="margin-top:18px">Filiais (Origem 5)</h2>' +
+      '<p class="hint">Unidade onde o colaborador trabalha, achada pelo CNPJ do vínculo — o código vai como Origem 5, e o canal dela define a Origem 4.</p>' +
+      '<div id="config-filiais" class="hint">Carregando…</div>' +
+    '</div>'
+
+  Promise.all([api('GET', '/admin/channels'), api('GET', '/admin/branches')]).then(([{ channels }, { branches }]) => {
+    if (!isCurrent()) return
+    document.getElementById('config-canais').innerHTML = channels.length
+      ? readOnlyTable(['Nome do canal', 'CNPJ da matriz', 'Código na Função', 'Descrição'],
+          channels.map((c) => [c.name, c.headquartersCnpj, c.funcaoCode, c.description]))
+      : 'Nenhum canal cadastrado.'
+    document.getElementById('config-filiais').innerHTML = branches.length
+      ? readOnlyTable(['CNPJ da filial', 'Nome fantasia', 'Canal', 'Código na Função', 'Descrição'],
+          branches.map((f) => [f.cnpj, f.tradeName, f.channel, f.funcaoCode, f.description]))
+      : 'Nenhuma filial cadastrada.'
+  }).catch((err) => { if (isCurrent()) showError('erro-config', err.message) })
+}
+
+/* ------------------------------------------------------------ 2 · Erros */
+
+/* -------------------------------------------------------- Funcionarios */
+
+// Ativo em verde e desligado em cinza: as mesmas cores de lote vigente e substituido.
+const EMPLOYMENT_STATUS_LABEL = { ACTIVE: ['Ativo', 'PUBLISHED'], TERMINATED: ['Desligado', 'SUPERSEDED'] }
+const EMPLOYEES_PER_PAGE = 50
+const NO_EMPLOYEE_FILTER = { search: '', employeeNumber: '', status: '', hireDateFrom: '', hireDateTo: '', page: 1 }
+let employeeFilter = NO_EMPLOYEE_FILTER
+
+/** Tempo de casa até hoje, por aniversário de calendário como o `completedYears` da API. Só exibição:
+ * a faixa do convênio é decidida na API. Admissão ausente ou no futuro = traço. */
+function tenureText(hireDate, today = new Date()) {
+  const m = String(hireDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return '—'
+  const months = (today.getFullYear() - Number(m[1])) * 12 + (today.getMonth() + 1 - Number(m[2])) - (today.getDate() < Number(m[3]) ? 1 : 0)
+  if (months < 0) return '—'
+  const n = (q, one, many) => q + ' ' + (q === 1 ? one : many)
+  const years = Math.floor(months / 12)
+  const remainder = months % 12
+  if (!years) return remainder ? n(remainder, 'mês', 'meses') : 'menos de 1 mês'
+  return n(years, 'ano', 'anos') + (remainder ? ' e ' + n(remainder, 'mês', 'meses') : '')
+}
+
+/** Vinculos do lote vigente — a base que a elegibilidade consulta. */
+function employeesScreen(isCurrent) {
+  const f = employeeFilter
+  app.innerHTML =
+    '<div class="card">' +
+      '<h1>Funcionários</h1>' +
+      '<p class="hint">Vínculos do lote vigente: é a base que a elegibilidade consulta. Ativos e desligados vêm das abas da planilha que o empregador deposita no bucket (acompanhe em <strong>Developer › Lotes</strong>).</p>' +
+      '<form id="form-funcionarios" style="margin-bottom:14px">' +
+        '<div class="linha" style="margin-bottom:10px">' +
+          '<input id="busca-funcionarios" placeholder="Nome, CPF ou CNPJ" spellcheck="false" value="' + esc(f.search) + '">' +
+          '<button class="acao" style="flex:0 0 160px">Buscar</button>' +
+        '</div>' +
+        '<div class="linha">' +
+          formField('f-chapa', 'Matrícula', '<input id="f-chapa" spellcheck="false" value="' + esc(f.employeeNumber) + '">') +
+          formField('f-situacao', 'Situação', '<select id="f-situacao">' + filterOptions('Todas', { ACTIVE: 'Ativo', TERMINATED: 'Desligado' }) + '</select>') +
+          formField('f-admissao-de', 'Admitidos de', '<input type="date" id="f-admissao-de" value="' + esc(f.hireDateFrom) + '">') +
+          formField('f-admissao-ate', 'Até', '<input type="date" id="f-admissao-ate" value="' + esc(f.hireDateTo) + '">') +
+          clearButton('limpar-funcionarios') +
+        '</div>' +
+      '</form>' +
+      alertBox('erro-funcionarios') +
+      '<div id="lista-funcionarios"><p class="hint">Carregando…</p></div>' +
+    '</div>'
+
+  document.getElementById('f-situacao').value = f.status
+  const go = (filter) => { employeeFilter = filter; employeesScreen(newScreen()) }
+  const value = (id) => document.getElementById(id).value.trim()
+  // Select e datas aplicam na troca; texto, no Enter ou no Buscar.
+  const apply = (ev) => {
+    if (ev) ev.preventDefault()
+    go({
+      search: value('busca-funcionarios'), employeeNumber: value('f-chapa'), status: value('f-situacao'),
+      hireDateFrom: value('f-admissao-de'), hireDateTo: value('f-admissao-ate'), page: 1,
+    })
+  }
+  document.getElementById('form-funcionarios').onsubmit = apply
+  for (const id of ['f-situacao', 'f-admissao-de', 'f-admissao-ate']) document.getElementById(id).onchange = () => apply()
+  document.getElementById('limpar-funcionarios').onclick = () => go(NO_EMPLOYEE_FILTER)
+
+  api('GET', '/admin/employees?' + queryFiltros({ ...f, pageSize: EMPLOYEES_PER_PAGE })).then((r) => {
+    if (!isCurrent()) return
+    document.getElementById('lista-funcionarios').innerHTML = r.data.length
+      ? '<div class="rolagem"><table class="tbl"><thead><tr>' +
+          '<th>Nome</th><th>Empregador</th><th>Matrícula</th><th>Situação</th><th>Admissão</th><th>Tempo de casa</th><th>Demissão</th><th></th>' +
+        '</tr></thead><tbody>' +
+        r.data.map((e) => {
+          const [label, color] = EMPLOYMENT_STATUS_LABEL[e.status] || [e.status, '']
+          return '<tr>' +
+            '<td>' + esc(e.name) + '<span class="sub">' + esc(e.cpf) + '</span></td>' +
+            '<td>' + esc(e.tradeName || '—') + '<span class="sub">' + esc(e.cnpj) + '</span></td>' +
+            '<td>' + esc(e.employeeNumber) + '</td>' +
+            '<td><span class="tag ' + color + '">' + esc(label) + '</span>' + (e.employerStatus ? '<span class="sub">' + esc(e.employerStatus) + '</span>' : '') + '</td>' +
+            '<td>' + esc(formatDate(e.hireDate)) + '</td>' +
+            '<td>' + esc(tenureText(e.hireDate)) + '</td>' +
+            '<td>' + esc(formatDate(e.terminationDate)) + '</td>' +
+            '<td><button class="alterar" data-funcionario="' + esc(e.id) + '">Detalhes</button></td>' +
+          '</tr>'
+        }).join('') +
+        '</tbody></table></div>' +
+        pager(r.meta, 'func')
+      : '<p class="hint">' + (f.search || f.employeeNumber || f.status || f.hireDateFrom || f.hireDateTo ? 'Nenhum funcionário com esses filtros.' : 'Nenhum funcionário no lote vigente.') + '</p>'
+    for (const b of document.querySelectorAll('[data-funcionario]')) {
+      b.onclick = () => employeeScreen(b.dataset.funcionario)
+    }
+    bindPager('func', r.meta.page, (page) => go({ ...f, page }))
+  }).catch((err) => { if (isCurrent()) showError('erro-funcionarios', err.message) })
+}
+
+const orDash = (v) => (v == null || v === '' ? '—' : String(v))
+
+/** Ficha do vinculo (so identificacao: a API nao devolve salario, contato, conta nem nascimento
+ * enquanto nao ha perfil de acesso), as propostas do CPF (de qualquer matricula) e, sob demanda, o
+ * Cadastro de Funcionario na Funcao — consultado pelo id do vinculo. */
+function employeeScreen(id, back = () => { portalTab.admin = 'funcionarios'; renderAdmin() }) {
+  const isCurrent = newScreen()
+  app.innerHTML = '<div class="card"><p class="hint">Carregando…</p></div>'
+  api('GET', '/admin/employees/' + encodeURIComponent(id)).then((f) => {
+    if (!isCurrent()) return
+    const [label, color] = EMPLOYMENT_STATUS_LABEL[f.status] || [f.status, '']
+    app.innerHTML =
+      '<div class="card" id="funcionario">' +
+        '<div class="cab-card"><h1>' + esc(f.name) + '</h1><span class="tag ' + color + '">' + esc(label) + '</span></div>' +
+        '<p class="hint">' + esc(f.tradeName || '—') + ' · CNPJ ' + esc(f.cnpj) + ' · matrícula ' + esc(f.employeeNumber) + '</p>' +
+        boxes([
+          { label: 'CPF', value: f.cpf },
+          { label: 'Situação na planilha', value: orDash(f.employerStatus) },
+          { label: 'Admissão', value: formatDate(f.hireDate) },
+          { label: 'Demissão', value: formatDate(f.terminationDate) },
+          { label: 'Cargo', value: orDash(f.jobTitle) },
+        ]) +
+        '<h2 style="margin-top:18px">Propostas</h2>' +
+        proposalsTable(f.proposals, 'Nenhuma proposta deste CPF.') +
+        '<h2 style="margin-top:18px">Cadastro na Função</h2>' +
+        '<p class="hint">Conferência com o Cadastro de Funcionário da Função: situação (ativo, afastado ou desligado) e admissão. Não decide elegibilidade — vale o lote vigente.</p>' +
+        alertBox('erro-funcao-func') +
+        '<div id="funcao-func"></div>' +
+        '<div class="linha"><button class="acao sec" id="btn-voltar-func">Voltar</button>' +
+        '<button class="acao" id="btn-funcao-func">Consultar na Função</button></div>' +
+      '</div>'
+    bindHistory()
+    document.getElementById('btn-voltar-func').onclick = back
+    document.getElementById('btn-funcao-func').onclick = (ev) => withButton(ev.currentTarget, 'Consultando…', async () => {
+      clearError('erro-funcao-func')
+      try {
+        const r = await api('POST', '/admin/employees/' + encodeURIComponent(id) + '/funcao/lookup')
+        if (!isCurrent()) return
+        document.getElementById('funcao-func').innerHTML = r.employees.length
+          ? '<div class="rolagem"><table class="tbl"><thead><tr><th>Matrícula</th><th>Situação</th><th>Admissão</th><th>Desligamento</th><th>Origem5</th></tr></thead><tbody>' +
+            r.employees.map((x) => {
+              return '<tr>' +
+                '<td>' + esc(orDash(x.employeeNumber)) + '</td>' +
+                '<td>' + esc(orDash(x.status && (FUNCAO_EMPLOYEE_STATUS_LABEL[x.status] || x.status))) + '</td>' +
+                '<td>' + esc(formatDate(x.hireDate)) + '</td>' +
+                '<td>' + esc(formatDate(x.terminationDate)) + '</td>' +
+                '<td>' + esc(orDash(x.origin5)) + '</td>' +
+              '</tr>'
+            }).join('') +
+            '</tbody></table></div>'
+          : '<p class="hint">A Função não tem este CPF no Cadastro de Funcionário.</p>'
+      } catch (err) {
+        if (isCurrent()) showError('erro-funcao-func', err.message)
+      }
+    })
+  }).catch((err) => {
+    if (!isCurrent()) return
+    app.innerHTML = '<div class="card"><div class="aviso erro">' + esc(err.message) + '</div><button class="acao sec" id="btn-voltar-func">Voltar</button></div>'
+    document.getElementById('btn-voltar-func').onclick = back
+  })
+}
+
+/* --------------------------------------------------------------- boot */
+
+// O selftest cobre as duas funcoes puras que erram em silencio: uma chave a mais no payload e o
+// `.strict()` da API recusa o PATCH inteiro; uma mensagem de erro mal extraida esconde o motivo.
+// E as derivacoes de tela que decidem o que o operador/colaborador ve: trilha da saga (sem vazar
+// etapa de inelegivel), filas, desfecho desconhecido, leitura da auditoria e lote vigente.
+function selftest() {
+  const cases = []
+  const check = (name, actual, expected) => cases.push({
+    name, ok: JSON.stringify(actual) === JSON.stringify(expected), actual: JSON.stringify(actual), expected: JSON.stringify(expected),
+  })
+
+  check('omite vazios, ignora chave desconhecida, apara espaços',
+    buildSupplementPayload({ motherName: '  Maria  ', documentNumber: '', documentState: '   ', unknownKey: 'x', pep: '' }),
+    { motherName: 'Maria' })
+  check('renda em pt-BR vira número',
+    buildSupplementPayload({ otherIncome: '1.250,50' }).otherIncome, 1250.5)
+  check('renda sem milhar também', parseBrNumber('1250,50'), 1250.5)
+  check('renda já em formato cru passa direto', parseBrNumber('1250.5'), 1250.5)
+  check('pep só entra quando escolhido — "nao" é false',
+    buildSupplementPayload({ pep: 'nao' }), { pep: false })
+  check('pep "sim" é true', buildSupplementPayload({ pep: 'sim' }), { pep: true })
+  check('message em lista vira frase', errorMessage({ message: ['a', 'b'] }, 400), 'a b')
+  check('esteira ausente não desenha nada', pipelineBox(null), '')
+  check('esteira traduz a situação', /Liberada — Tela de confirmação/.test(pipelineBox({ status: 'DISBURSED', activityDescription: 'Tela de confirmação', reasons: [] })), true)
+  check('problem+json usa o title', errorMessage({ title: 'Proposta não encontrada.', status: 404 }, 404), 'Proposta não encontrada.')
+  check('erro do Zod mostra o motivo, não "Validation failed"',
+    errorMessage({ statusCode: 400, message: 'Validation failed', errors: [{ message: 'Informe exatamente um dos dois.' }] }, 400),
+    'Informe exatamente um dos dois.')
+  check('sem message usa fallback por status', errorMessage(null, 500), 'Serviço indisponível agora. Tente novamente.')
+  check('data ISO vira pt-BR', formatDate('2026-03-09T00:00:00.000Z'), '09/03/2026')
+  check('convênio explica a faixa de tempo de casa',
+    agreementText({ code: '003030', tenureMinYears: 1, tenureMaxYears: 3 }, 2),
+    'Convênio 003030 — de 1 a 3 anos de casa (você tem 2 anos)')
+  check('faixa aberta vira "ou mais"',
+    agreementText({ code: '003034', tenureMinYears: 7, tenureMaxYears: null }, 9),
+    'Convênio 003034 — 7 anos de casa ou mais (você tem 9 anos)')
+  check('status da spec tem rótulo', STATUS_LABEL.AWAITING_CUSTOMER_DATA, 'Aguardando cadastro')
+  check('mensagem sai do status, não da API', [STATUS_MESSAGE.INELIGIBLE, STATUS_MESSAGE.SUBMITTED], ['Não há oferta disponível para o cliente informado.', undefined])
+  check('estado interno traduzido, código junto', labelCodeText(INTERNAL_STATUS_LABEL, 'ERROR_RETRYABLE'), 'Erro retentável · ERROR_RETRYABLE')
+  check('motivo com detalhe usa o prefixo', labelOf(REASON_LABEL, 'FUNCAO_UNAVAILABLE: inclusao http=503'), 'Função indisponível')
+  check('código sem rótulo aparece cru', [reasonLabel('NOVO_CODIGO'), reasonLabel(null)], ['NOVO_CODIGO', '—'])
+  check('box de código: rótulo no valor, código no sub', codeBox('Estado interno', INTERNAL_STATUS_LABEL, 'FAILED_PERMANENT'),
+    { label: 'Estado interno', value: 'Falha definitiva (DLQ)', sub: 'FAILED_PERMANENT' })
+  check('status da etapa traduzido', ['PENDING', 'SUCCEEDED', 'FAILED'].map(stepStatusLabel), ['em andamento', 'concluída', 'com falha'])
+  const today = new Date(2026, 9, 12)
+  check('tempo de casa em anos e meses', tenureText('2024-03-10', today), '2 anos e 7 meses')
+  check('tempo de casa fecha o ano no aniversário', tenureText('2025-10-12', today), '1 ano')
+  check('na véspera do aniversário ainda não fechou', tenureText('2025-10-13', today), '11 meses')
+  check('admitido neste mês', tenureText('2026-10-01', today), 'menos de 1 mês')
+  check('admissão ausente ou futura vira traço', [tenureText(null, today), tenureText('2026-11-01', today)], ['—', '—'])
+  check('filtro vazio não vai na query', queryFiltros({ pageSize: 50, status: '', step: 'SIMULATION', from: '2026-10-01', to: '' }),
+    'pageSize=50&step=SIMULATION&from=2026-10-01')
+
+  const states = (p) => journeySteps(p).map((e) => e.state)
+  check('trilha: simulada fecha elegibilidade, convênio e simulação',
+    states({ status: 'SIMULATED', currentStep: { step: 'SIMULATION', status: 'SUCCEEDED' } }),
+    ['concluida', 'concluida', 'concluida', 'pendente', 'pendente', 'pendente'])
+  check('trilha: etapa em retry fica "atual"',
+    states({ status: 'UNDER_REVIEW', currentStep: { step: 'INCLUSION', status: 'PENDING' } }),
+    ['concluida', 'concluida', 'concluida', 'concluida', 'concluida', 'atual'])
+  check('trilha: falha marca a etapa', states({ status: 'ERROR', currentStep: { step: 'SIMULATION', status: 'FAILED' } })[2], 'falha')
+  check('trilha: incluída fecha tudo', states({ status: 'SUBMITTED', currentStep: null }).every((e) => e === 'concluida'), true)
+  check('trilha: inelegível não mostra até onde chegou (RF-ELG-002/003)',
+    journeySteps({ status: 'INELIGIBLE', currentStep: { step: 'AGREEMENT', status: 'FAILED' } }), [])
+
+  const f = queuesSummary([
+    { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: '2026-10-01T10:05:00Z', dlq: null },
+    { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: '2026-10-01T10:01:00Z', dlq: null },
+    { internalStatus: 'SUBMITTING', retryScheduledAt: null, dlq: null },
+    { internalStatus: 'FAILED_PERMANENT', retryScheduledAt: null, dlq: { at: 'x', reason: 'RETRY_EXHAUSTED' } },
+  ])
+  check('filas: retry em ordem de execução', f.retry.map((p) => p.retryScheduledAt), ['2026-10-01T10:01:00Z', '2026-10-01T10:05:00Z'])
+  check('filas: contagens', [f.submitting.length, f.awaitingData.length, f.dlq.length, f.byInternalStatus[0]], [1, 0, 1, ['ERROR_RETRYABLE', 2]])
+
+  const historyView = (internalStatus, steps, status) => ({ internalStatus, status, steps: steps || [] })
+  check('desfecho desconhecido reconhecido pela etapa',
+    awaitsReconciliation(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }])), true)
+  check('inclusão em curso não é desfecho desconhecido',
+    awaitsReconciliation(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: null }])), false)
+  check('DLQ orienta nova simulação, não reprocesso', /nova simulação/.test(supportNote(historyView('FAILED_PERMANENT'))), true)
+  check('retry agendado: o worker reprocessa sozinho', /sozinho/.test(supportNote(historyView('ERROR_RETRYABLE', [], 'UNDER_REVIEW'))), true)
+  check('desfecho desconhecido: o serviço resolve sozinho', /Função a cada minuto/.test(supportNote(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }]))), true)
+
+  const currentBatches = currentByDataset([
+    { dataset: 'EMPLOYMENT', status: 'SUPERSEDED', publishedAt: '2026-09-30' },
+    { dataset: 'EMPLOYMENT', status: 'PUBLISHED', publishedAt: '2026-09-20', id: 'b' },
+    { dataset: 'EMPLOYMENT', status: 'REJECTED', publishedAt: null },
+  ])
+  check('lote vigente é o PUBLISHED, nunca REJECTED/SUPERSEDED', currentBatches.EMPLOYMENT && currentBatches.EMPLOYMENT.id, 'b')
+  check('base sem PUBLISHED fica sem vigente', currentByDataset([]).EMPLOYMENT, null)
+  check('status do lote no vocabulário do operador', ['PROCESSING', 'PUBLISHED', 'REJECTED'].map(batchStatusLabel).join('/'), 'Processando/Processado/Erro')
+  check('health fica fora do /api', serviceRoot('http://localhost:3010/api/'), 'http://localhost:3010')
+
+  // Revisão do Reviewr (B1–B9, S1–S7)
+  check('roteamento por status e condição escolhida', [
+    { status: 'SIMULATED', selectedOfferId: null },
+    { status: 'AWAITING_CUSTOMER_DATA', selectedOfferId: 'c' },
+    { status: 'SIMULATED', selectedOfferId: 'c' },
+    { status: 'ERROR', selectedOfferId: 'c', canRetry: true },
+    { status: 'ERROR', selectedOfferId: 'c', canRetry: false },
+    { status: 'UNDER_REVIEW', selectedOfferId: 'c' },
+    { status: 'INELIGIBLE', selectedOfferId: null },
+  ].map(stepFor), [2, 3, 4, 4, 5, 5, 5])
+  check('B1: recusa da inclusão (canRetry) volta ao envio', canResume({ status: 'ERROR', selectedOfferId: 'c', canRetry: true }), true)
+  check('B1: erro sem condição (simulação) não oferece', canResume({ status: 'ERROR', selectedOfferId: null, canRetry: true }), false)
+  check('B1: DLQ (sem canRetry) não oferece', canResume({ status: 'ERROR', selectedOfferId: 'c', canRetry: false }), false)
+  check('crédito máximo é a oferta de maior valor da Função', bestOffer([{ requestedAmount: 900 }, { requestedAmount: 1500 }, { requestedAmount: 1200 }]), { requestedAmount: 1500 })
+  check('sem oferta não há crédito máximo', [bestOffer([]), bestOffer(undefined)], [null, null])
+  check('ajuste: oferta do requote não se diz crédito máximo',
+    [offerHeadline({ requestedInstallment: null }), offerHeadline({ requestedInstallment: 600 })], ['Valor escolhido por você', 'Crédito máximo disponível'])
+  check('ajuste: valor pt-BR na faixa vai em centavos, limites inclusos',
+    [checkRequoteAmount('1.250,50', 500, 2000), checkRequoteAmount('500', 500, 2000), checkRequoteAmount('2000.004', 500, 2000)],
+    [{ amount: 1250.5 }, { amount: 500 }, { amount: 2000 }])
+  check('ajuste: abaixo do piso, acima do máximo ou vazio não vai à API',
+    ['499,99', '2000.01', ''].map((v) => 'error' in checkRequoteAmount(v, 500, 2000)), [true, true, true])
+  check('erro do Zod leva o nome do campo',
+    errorMessage({ errors: [{ path: ['district'], message: 'Too big' }, { path: ['x'], message: 'Outro' }] }, 400), 'Bairro do endereço: Too big Outro')
+  check('maxlength espelha a API', /maxlength="25"/.test(textInput('district', '')), true)
+
+  check('B7: sem valor calculado o box some', requestedInstallmentLabel({ requestedInstallment: null, employee: { salary: 1000 } }), null)
+  check('B7: renda estimada não diz "seu salário"', /renda estimada/.test(requestedInstallmentLabel({ requestedInstallment: 600, employee: { salary: 0 } })), true)
+  check('B7: com salário cita o salário da API', /30% do seu salário de R\$\s?2\.000,00/.test(requestedInstallmentLabel({ requestedInstallment: 600, employee: { salary: 2000 } })), true)
+
+  check('S3: polling desacelera e para', [0, 9, 10, 29, 30].map(nextPollDelay), [3000, 3000, 15000, 15000, null])
+  check('S4: erro sem retry vira balde próprio', queuesSummary([
+    { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: null, dlq: null },
+    { internalStatus: 'ERROR_RETRYABLE', retryScheduledAt: 'x', dlq: null },
+  ]).stalled.length, 1)
+  check('S5: cancelada não deixa etapas "a seguir"',
+    states({ status: 'CANCELLED', currentStep: { step: 'SIMULATION', status: 'SUCCEEDED' } }),
+    ['concluida', 'concluida', 'concluida', 'neutra', 'neutra', 'neutra'])
+
+  const t1 = newScreen()
+  const t2 = newScreen()
+  check('B5/B6: só a tela mais recente pinta', [t1(), t2()], [false, true])
+
+  app.innerHTML = '<div class="card"><h1>Selftest</h1>' + cases.map((c) =>
+    '<p class="' + (c.ok ? 'ok' : 'fail') + '">' + (c.ok ? '✓' : '✗') + ' ' + esc(c.name) +
+    (c.ok ? '' : '<br><small>esperado ' + esc(c.expected) + ', veio ' + esc(c.actual) + '</small>') + '</p>'
+  ).join('') + '<p class="hint">' + cases.filter((c) => c.ok).length + '/' + cases.length + ' ok</p></div>'
+}
+
+// Uma pagina, tres publicos: colaborador em /, backoffice em /admin/ e developer em /dev/ (ou
+// #admin/#dev, para quem serve a pasta com um servidor estatico simples). O switch do cabecalho
+// troca pelo hash, sem reload: a jornada do colaborador continua no sessionStorage e a aba de cada
+// portal em memoria, entao ir e voltar nao perde o ponto em que cada um estava. O hash vence o caminho.
+const MODES = {
+  colaborador: { title: 'Consignado Privado — proposta', brand: 'Consignado Privado', sub: 'Crédito com desconto em folha' },
+  admin: { title: 'Backoffice — Consignado', brand: 'Backoffice', sub: 'Operação do Consignado Privado' },
+  dev: { title: 'Developer — Consignado', brand: 'Developer', sub: 'Filas, DLQ e cargas em segundo plano' },
+}
+function currentMode() {
+  const fromHash = location.hash.slice(1)
+  if (MODES[fromHash]) return fromHash
+  const fromPath = (location.pathname.match(/^\/(admin|dev)(\/|$)/) || [])[1]
+  return fromPath || 'colaborador'
+}
+
+function applyMode() {
+  if (location.hash === '#selftest') return selftest()
+  const mode = currentMode()
+  const portal = mode !== 'colaborador'
+  // O polling do acompanhamento nao pode repintar a tela do portal por cima, nem o das filas a do
+  // colaborador.
+  clearTimeout(pollTimer)
+  clearTimeout(queuesTimer)
+  document.body.classList.toggle('admin', portal)
+  document.body.classList.toggle('dev', mode === 'dev')
+  document.title = MODES[mode].title
+  document.getElementById('marca').firstChild.textContent = MODES[mode].brand
+  document.getElementById('marca-sub').textContent = MODES[mode].sub
+  for (const b of document.querySelectorAll('[data-modo]')) {
+    b.setAttribute('aria-selected', String(b.dataset.modo === mode))
+  }
+  if (portal) {
+    portalMode = mode
+    renderAdmin()
+  } else {
+    render()
+  }
+  window.scrollTo(0, 0)
+}
+
+for (const b of document.querySelectorAll('[data-modo]')) {
+  b.onclick = () => { location.hash = '#' + b.dataset.modo }
+}
+window.addEventListener('hashchange', applyMode)
+applyMode()
+if (location.hash !== '#selftest') paintHealth()
+</script>
+</body>
+</html>
