@@ -83,6 +83,8 @@ button.acao.coral{background:var(--coral)}
 .aviso{border-radius:10px;padding:11px 13px;font-size:13px;margin-bottom:14px}
 .aviso.info{background:#eaf4fa;border:1px solid #bcd9e9;color:var(--azul-escuro)}
 .aviso.erro{background:#fdecee;border:1px solid #f3c2c8;color:#8d2531}
+.aviso.alerta{background:#fdf1dc;border:1px solid #f0d49b;color:#8a5a00}
+.aviso.ok{background:#e4f5ea;border:1px solid #b9e2c7;color:#1b7a3e}
 .opcao{display:flex;justify-content:space-between;width:100%;margin-bottom:8px}
 .prazo{display:flex;align-items:center;gap:8px;margin:0;font-size:14px;cursor:pointer}.prazo input{width:auto;margin:0}
 fieldset{border:0;padding:0;margin:0 0 22px}
@@ -141,6 +143,8 @@ body.admin button.acao.coral{background:var(--coral)}
 .tag.PROCESSING{background:#fdf1dc;color:#8a5a00}
 .tag.SUPERSEDED{background:#eceff2;color:var(--hint)}
 .tag.REJECTED{background:#fdecee;color:#8d2531}
+.tag.RETRYING{background:#fde6d6;color:#9a4a12}
+.tag.FAILED{background:#8d2531;color:#fff}
 .rolagem{overflow-x:auto;margin:0 -22px;padding:0 22px}
 /* Cabecalho, conteudo e rodape tem a mesma largura nos dois sistemas: a marca e o switch nao
    pulam de lugar na troca. O portal e tabela e usa a largura toda; a jornada do colaborador e
@@ -537,7 +541,8 @@ const REASON_LABEL = {
   SNAPSHOT_MISSING: 'Vínculo congelado ausente',
   NOT_ACTIVE: 'Vínculo não ativo',
   ON_VACATION: 'Vínculo de férias',
-  TENURE_BELOW_1_YEAR: 'Menos de 1 ano de casa',
+  AGE_OUT_OF_RANGE: 'Fora da faixa de 18 a 80 anos',
+  TENURE_BELOW_1_YEAR: 'Até 1 ano de casa',
   MISSING_ADMISSION_DATE: 'Sem data de admissão',
   AGREEMENT_BAND_MISSING: 'Sem convênio para o tempo de casa',
   NO_PUBLISHED_EMPLOYMENT_BATCH: 'Sem lote de vínculos publicado',
@@ -557,6 +562,7 @@ const REASON_LABEL = {
   NO_CONDITION_SELECTED: 'Nenhuma condição escolhida',
   TERM_NOT_OFFERED: 'Prazo fora da tabela de prazos',
   AMOUNT_OUT_OF_RANGE: 'Valor fora da faixa do prazo',
+  OUTSIDE_CREDIT_POLICY: 'Fora da política de crédito',
   CHECK_FAILED: 'Falha ao consultar o Cliente PF',
   CUSTOMER_DATA_MISSING: 'Cadastro do colaborador incompleto',
   CUSTOMER_DATA_INCOMPLETE: 'Cadastro do colaborador incompleto',
@@ -579,6 +585,11 @@ const REASON_LABEL = {
   RECONCILE_AMBIGUOUS: 'Conciliação: mais de uma proposta nova na Função',
   PIPELINE_REJECTED: 'Reprovada na esteira da Função',
   PIPELINE_CANCELLED: 'Cancelada na esteira da Função',
+  ANTIFRAUD_INPUT_MISSING: 'Triagem antifraude sem dado de entrada',
+  ANTIFRAUD_UNAVAILABLE: 'Certta indisponível',
+  ANTIFRAUD_REQUEST_REJECTED: 'Certta recusou a transação',
+  ANTIFRAUD_NOTE_UNAVAILABLE: 'Falha ao gravar a observação na Função',
+  ANTIFRAUD_NOTE_REJECTED: 'Função recusou a observação',
   RETRY_EXHAUSTED: 'Tentativas esgotadas',
   UNEXPECTED: 'Erro inesperado',
   FUNCAO_UNAVAILABLE: 'Função indisponível',
@@ -1068,7 +1079,7 @@ function paintCustomerData(view, isCurrent) {
             formField('correctedBankAccount', 'Conta (sem dígito)', textInput('correctedBankAccount', f.correctedBankAccount)),
             ['correctedBankCode', 'correctedBankBranch', 'correctedBankAccount'].some(isMissing)) +
         '</div>' +
-        '<p class="hint">Nome, nascimento, empresa, matrícula, admissão e salário vêm do seu cadastro na empresa — para corrigir, fale com o RH. Telefone, endereço e dados bancários você mesmo altera aqui (a correção fica só nesta jornada, não reescreve a base).</p>' +
+        '<p class="hint">Nome, nascimento, empresa, matrícula, admissão e salário vêm do seu cadastro na empresa — para corrigir, fale com o RH. Telefone, endereço e dados bancários você mesmo altera aqui (a correção fica só nesta jornada, não reescreve a base). O crédito só pode ser depositado em conta b.Uni (banco 530): se a sua conta cadastrada é de outro banco, informe a conta b.Uni.</p>' +
 
         '<fieldset><legend>Dados pessoais</legend><div class="grid form">' +
           (isMissing('sex') ? formField('sex', 'Sexo', selectInput('sex', f.sex, Object.entries(SEX_LABEL), true), true) : '') +
@@ -1305,7 +1316,18 @@ const BATCH_STATUS_LABEL = {
   PROCESSING: 'Processando',
   PUBLISHED: 'Processado',
   SUPERSEDED: 'Substituído',
-  REJECTED: 'Erro',
+  REJECTED: 'Recusado',
+  RETRYING: 'Tentando de novo',
+  FAILED: 'Falhou',
+}
+// O que o operador faz com a ultima planilha, e a cor do aviso no topo da aba Funcionarios.
+const BATCH_STATUS_HINT = {
+  PROCESSING: ['alerta', 'Sendo lida agora.'],
+  PUBLISHED: ['ok', 'É a base em uso pela elegibilidade.'],
+  SUPERSEDED: ['info', 'Chegou depois de uma planilha mais nova e não entrou em uso.'],
+  REJECTED: ['erro', 'O arquivo está errado: corrija a planilha e deposite de novo no bucket.'],
+  RETRYING: ['alerta', 'Falhou nesta tentativa; o serviço tenta de novo no próximo ciclo (a cada minuto).'],
+  FAILED: ['erro', 'Esgotou as tentativas. Revise o arquivo e, se estiver correto, acione a equipe de T.I.'],
 }
 const batchStatusLabel = (s) => BATCH_STATUS_LABEL[s] || s
 const DATASET_OPTIONS = Object.entries(DATASETS).map(([k, v]) => [k, v.label])
@@ -1781,7 +1803,7 @@ function batchesScreen(isCurrent) {
   app.innerHTML =
     '<div class="card">' +
       '<h1>Planilha de vínculos</h1>' +
-      '<p class="hint">O empregador deposita a planilha (.xlsx com as abas <strong>Ativos</strong> e <strong>DEMITIDOS</strong>, ou .csv único separado pela coluna SITUACAO) na caixa de entrada do bucket; o serviço a busca sozinho a cada ciclo e cria um lote. O lote fica <strong>Processando</strong> enquanto é lido e, ao terminar, vira <strong>Processado</strong> — vigente, no lugar do anterior — ou <strong>Erro</strong>, com o motivo. Linhas recusadas ficam no lote para consulta. Canais e filiais ficam na aba Configurações.</p>' +
+      '<p class="hint">O empregador deposita a planilha (.xlsx com as abas <strong>Ativos</strong> e <strong>DEMITIDOS</strong>, ou .csv único separado pela coluna SITUACAO) na caixa de entrada do bucket; o serviço a busca sozinho a cada ciclo e cria um lote. Antes de ler, o arquivo passa por uma verificação de integridade; depois de gravar, o serviço confere que o banco tem as linhas aceitas. O lote fica <strong>Processando</strong> enquanto é lido e, ao terminar, vira <strong>Processado</strong> — vigente, no lugar do anterior — ou <strong>Recusado</strong>, com o motivo, quando o arquivo está errado. Falha inesperada deixa o lote <strong>Tentando de novo</strong> e o próximo ciclo repete, até 3 tentativas; esgotadas, vira <strong>Falhou</strong> e o arquivo fica guardado para a equipe de T.I. Linhas recusadas ficam no lote para consulta. Canais e filiais ficam na aba Configurações.</p>' +
       alertBox('erro-lote') +
       '<button class="acao" id="btn-atualizar">Atualizar lotes</button>' +
     '</div>' +
@@ -1868,13 +1890,14 @@ async function loadBatches() {
       (withoutCurrent.length ? '<div class="aviso erro">Sem lote vigente em ' + esc(withoutCurrent.map((k) => DATASET_LABEL[k]).join(', ') + '. Propostas que dependem dessa base ficam indisponíveis (erro para o colaborador) até a publicação.') + '</div>' : '') +
       (batches.length
       ? '<div class="rolagem"><table class="tbl"><thead><tr>' +
-        '<th>Base</th><th>Arquivo</th><th>Status</th><th>Lidas</th><th>Aceitas</th><th>Rejeitadas</th><th>Criado</th><th>Publicado por</th><th></th>' +
+        '<th>Base</th><th>Arquivo</th><th>Status</th><th>Tentativas</th><th>Lidas</th><th>Aceitas</th><th>Rejeitadas</th><th>Criado</th><th>Publicado por</th><th></th>' +
         '</tr></thead><tbody>' +
         batches.map((b) =>
           '<tr>' +
             '<td>' + esc(DATASET_LABEL[b.dataset] || b.dataset) + '</td>' +
             '<td class="quebra">' + esc(b.filename) + '</td>' +
             '<td><span class="tag ' + esc(b.status) + '">' + esc(batchStatusLabel(b.status)) + '</span>' + (currentBatches[b.dataset] === b ? '<span class="sub">vigente</span>' : '') + (b.errorMessage ? '<span class="sub fail">' + esc(b.errorMessage) + '</span>' : '') + '</td>' +
+            '<td class="num">' + esc(b.attempts + '/' + b.maxAttempts) + '<span class="sub">' + esc(formatDateTime(b.lastAttemptAt)) + '</span></td>' +
             '<td class="num">' + esc(b.rowCount + b.rejectedCount) + '</td>' +
             '<td class="num">' + esc(b.rowCount) + '</td>' +
             '<td class="num">' + esc(b.rejectedCount) + '</td>' +
@@ -1951,10 +1974,42 @@ function tenureText(hireDate, today = new Date()) {
   return n(years, 'ano', 'anos') + (remainder ? ' e ' + n(remainder, 'mês', 'meses') : '')
 }
 
+/**
+ * Topo da aba: como foi a ultima planilha recebida (deu certo ou errado, com data, motivo e
+ * tentativas) e, se nao foi ela que virou a base, qual e a vigente. A API devolve do mais novo ao
+ * mais antigo.
+ */
+function paintLastIngestion(isCurrent) {
+  api('GET', DATASETS.EMPLOYMENT.path).then(({ batches }) => {
+    if (!isCurrent()) return
+    const [last] = batches
+    const current = currentByDataset(batches).EMPLOYMENT
+    const target = document.getElementById('ultima-ingestao')
+    if (!last) {
+      target.innerHTML = '<div class="aviso erro">Nenhuma planilha recebida ainda: sem base de funcionários.</div>'
+      return
+    }
+    const [tone, hint] = BATCH_STATUS_HINT[last.status] || ['info', '']
+    target.innerHTML =
+      '<div class="aviso ' + tone + '" data-status="' + esc(last.status) + '">' +
+        '<strong>Última planilha:</strong> ' + esc(last.filename) + ' <span class="tag ' + esc(last.status) + '">' + esc(batchStatusLabel(last.status)) + '</span><br>' +
+        'Recebida em ' + esc(formatDateTime(last.createdAt)) +
+        (last.lastAttemptAt ? ' · última tentativa em ' + esc(formatDateTime(last.lastAttemptAt)) : '') +
+        ' · tentativas: ' + esc(last.attempts + ' de ' + last.maxAttempts) +
+        (last.status === 'PUBLISHED' ? ' · ' + esc(last.rowCount) + ' vínculos' : '') +
+        (last.errorMessage ? '<br><strong>Motivo:</strong> ' + esc(last.errorMessage) : '') +
+        '<br>' + esc(hint) +
+        (current && current !== last ? '<br>Base em uso: ' + esc(current.filename) + ', publicada em ' + esc(formatDateTime(current.publishedAt)) + '.' : '') +
+        (current ? '' : '<br><strong>Sem base vigente:</strong> ninguém passa na elegibilidade até uma planilha ser publicada.') +
+      '</div>'
+  }).catch(() => { /* a aba segue funcionando sem o aviso */ })
+}
+
 /** Vinculos do lote vigente — a base que a elegibilidade consulta. */
 function employeesScreen(isCurrent) {
   const f = employeeFilter
   app.innerHTML =
+    '<div id="ultima-ingestao"></div>' +
     '<div class="card">' +
       '<h1>Funcionários</h1>' +
       '<p class="hint">Vínculos do lote vigente: é a base que a elegibilidade consulta. Ativos e desligados vêm das abas da planilha que o empregador deposita no bucket (acompanhe em <strong>Developer › Lotes</strong>).</p>' +
@@ -1990,6 +2045,7 @@ function employeesScreen(isCurrent) {
   for (const id of ['f-situacao', 'f-admissao-de', 'f-admissao-ate']) document.getElementById(id).onchange = () => apply()
   document.getElementById('limpar-funcionarios').onclick = () => go(NO_EMPLOYEE_FILTER)
 
+  paintLastIngestion(isCurrent)
   api('GET', '/admin/employees?' + queryFiltros({ ...f, pageSize: EMPLOYEES_PER_PAGE })).then((r) => {
     if (!isCurrent()) return
     document.getElementById('lista-funcionarios').innerHTML = r.data.length
@@ -2174,7 +2230,7 @@ function selftest() {
   ])
   check('lote vigente é o PUBLISHED, nunca REJECTED/SUPERSEDED', currentBatches.EMPLOYMENT && currentBatches.EMPLOYMENT.id, 'b')
   check('base sem PUBLISHED fica sem vigente', currentByDataset([]).EMPLOYMENT, null)
-  check('status do lote no vocabulário do operador', ['PROCESSING', 'PUBLISHED', 'REJECTED'].map(batchStatusLabel).join('/'), 'Processando/Processado/Erro')
+  check('status do lote no vocabulário do operador', ['PROCESSING', 'PUBLISHED', 'REJECTED', 'RETRYING', 'FAILED'].map(batchStatusLabel).join('/'), 'Processando/Processado/Recusado/Tentando de novo/Falhou')
   check('health fica fora do /api', serviceRoot('http://localhost:3010/api/'), 'http://localhost:3010')
 
   // Revisão do Reviewr (B1–B9, S1–S7)
