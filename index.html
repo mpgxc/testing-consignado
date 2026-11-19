@@ -782,6 +782,11 @@
       min-width: 180px;
     }
 
+    /* Botão de envio na linha dos campos: alinha com o input, não com o label. */
+    form.linha>button.acao {
+      align-self: flex-end;
+    }
+
     /* ---------- formulario: Label, Input, Select ---------- */
     label {
       display: block;
@@ -2358,10 +2363,13 @@
     const yearlyPercent = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + '% a.a.')
     const countOrDash = (n) => (n == null ? '—' : String(n))
 
-    /** Dados financeiros do contrato como a Funcao devolve: a tela so formata, nao calcula nada. */
-    function contractDetailScreen(c, back) {
+    /**
+     * Dados financeiros do contrato como a Funcao devolve: a tela so formata, nao calcula nada. No
+     * backoffice (`keepTabs`) as abas do portal ficam; na visao do colaborador a trilha some.
+     */
+    function contractDetailScreen(c, back, keepTabs) {
       newScreen()
-      document.getElementById('stepper').innerHTML = ''
+      if (!keepTabs) document.getElementById('stepper').innerHTML = ''
       const installments = c.installments == null ? '—' : c.installments + 'x de ' + money(c.installmentAmount)
       app.innerHTML =
         '<div class="card" id="detalhe-contrato">' +
@@ -2984,7 +2992,7 @@
      * As duas visoes sao o mesmo portal com abas diferentes; cada uma lembra a sua aba.
      */
     const PORTAL_TABS = {
-      admin: [['propostas', 'Propostas'], ['funcionarios', 'Funcionários'], ['configuracoes', 'Configurações']],
+      admin: [['propostas', 'Propostas'], ['funcionarios', 'Funcionários'], ['contratos', 'Contratos'], ['configuracoes', 'Configurações']],
       dev: [['filas', 'Filas'], ['dlq', 'DLQ'], ['lotes', 'Lotes'], ['funcao', 'Função'], ['antifraude', 'Antifraude']],
     }
     const portalTab = { admin: 'propostas', dev: 'filas' }
@@ -3015,6 +3023,7 @@
       else if (tab === 'funcao') funcaoScreen(isCurrent)
       else if (tab === 'antifraude') antifraudScreen(isCurrent)
       else if (tab === 'funcionarios') employeesScreen(isCurrent)
+      else if (tab === 'contratos') adminContractsScreen(isCurrent)
       else settingsScreen(isCurrent)
     }
 
@@ -3837,6 +3846,58 @@
       rows.map((cells) => '<tr>' + cells.map((c) => '<td>' + esc(c || '—') + '</td>').join('') + '</tr>').join('') +
       '</tbody></table></div>'
 
+    // Ultima busca da aba Contratos: o "Voltar" do detalhe reabre a lista sem consultar de novo.
+    let contractSearch = null
+
+    /**
+     * Contratos em aberto de um CPF, lidos na Funcao. Nao ha lista geral: a Funcao so busca
+     * operacao por CPF, nome, matricula ou numero (HML, 19/11/2026).
+     */
+    function adminContractsScreen(isCurrent) {
+      const last = contractSearch
+      app.innerHTML =
+        '<div class="card">' +
+        '<h1>Contratos</h1>' +
+        '<p class="hint">Contratos em aberto na Função, consultados na hora pelo CPF e pelas matrículas do lote vigente. A Função não lista contratos sem um CPF.</p>' +
+        '<form id="form-contratos" style="margin-bottom:14px"><div class="linha">' +
+        '<input id="cpf-contratos" placeholder="CPF" inputmode="numeric" spellcheck="false" value="' + esc(last ? maskCpf(last.cpf) : '') + '">' +
+        '<button class="acao" style="flex:0 0 160px">Buscar</button>' +
+        '</div></form>' +
+        alertBox('erro-contratos') +
+        '<div id="lista-contratos">' + (last ? contractsList(last.contracts) : '') + '</div>' +
+        '</div>'
+
+      const input = document.getElementById('cpf-contratos')
+      input.oninput = () => { input.value = maskCpf(input.value) }
+      document.getElementById('form-contratos').onsubmit = (ev) => {
+        ev.preventDefault()
+        clearError('erro-contratos')
+        const cpf = input.value.replace(/\D/g, '')
+        if (cpf.length !== 11) return showError('erro-contratos', 'Informe os 11 dígitos do CPF.')
+        withButton(ev.submitter, 'Consultando…', async () => {
+          try {
+            const { contracts } = await api('POST', '/admin/contracts/lookup', { cpf })
+            if (!isCurrent()) return
+            contractSearch = { cpf, contracts }
+            adminContractsScreen(isCurrent)
+          } catch (err) {
+            if (isCurrent()) showError('erro-contratos', err.message)
+          }
+        })
+      }
+      for (const b of app.querySelectorAll('[data-contrato]')) {
+        b.onclick = () => withButton(b, 'Abrindo…', async () => {
+          clearError('erro-contratos')
+          try {
+            const detail = await api('POST', '/admin/contracts/details', { cpf: last.cpf, contractNumber: b.dataset.contrato })
+            if (isCurrent()) contractDetailScreen(detail, renderAdmin, true)
+          } catch (err) {
+            if (isCurrent()) showError('erro-contratos', err.message)
+          }
+        })
+      }
+    }
+
     function settingsScreen(isCurrent) {
       app.innerHTML =
         '<div class="card">' +
@@ -4014,6 +4075,30 @@
     /** Ficha do vinculo (so identificacao: a API nao devolve salario, contato, conta nem nascimento
      * enquanto nao ha perfil de acesso), as propostas do CPF (de qualquer matricula) e, sob demanda, o
      * Cadastro de Funcionario na Funcao — consultado pelo id do vinculo. */
+    /** Contratos em aberto do CPF, lidos na Funcao a cada abertura; a falha nao derruba o resto da tela. */
+    function paintEmployeeContracts(id, cpf, back, isCurrent) {
+      api('POST', '/admin/contracts/lookup', { cpf }).then(({ contracts }) => {
+        if (!isCurrent()) return
+        document.getElementById('contratos-func-qtd').textContent = '(' + contracts.length + ')'
+        document.getElementById('contratos-func').innerHTML = contractsList(contracts)
+        for (const b of app.querySelectorAll('[data-contrato]')) {
+          b.onclick = () => withButton(b, 'Abrindo…', async () => {
+            clearError('erro-contratos-func')
+            try {
+              const detail = await api('POST', '/admin/contracts/details', { cpf, contractNumber: b.dataset.contrato })
+              if (isCurrent()) contractDetailScreen(detail, () => employeeScreen(id, back), true)
+            } catch (err) {
+              if (isCurrent()) showError('erro-contratos-func', err.message)
+            }
+          })
+        }
+      }, (err) => {
+        if (!isCurrent()) return
+        document.getElementById('contratos-func').innerHTML = ''
+        showError('erro-contratos-func', 'Não foi possível consultar os contratos agora. ' + err.message)
+      })
+    }
+
     function employeeScreen(id, back = () => { portalTab.admin = 'funcionarios'; renderAdmin() }) {
       const isCurrent = newScreen()
       app.innerHTML = '<div class="card"><p class="hint">Carregando…</p></div>'
@@ -4031,6 +4116,9 @@
             { label: 'Demissão', value: formatDate(f.terminationDate) },
             { label: 'Cargo', value: orDash(f.jobTitle) },
           ]) +
+          '<h2 style="margin-top:18px">Contratos ativos <span id="contratos-func-qtd"></span></h2>' +
+          alertBox('erro-contratos-func') +
+          '<div id="contratos-func"><p class="hint">Consultando na Função…</p></div>' +
           '<h2 style="margin-top:18px">Propostas</h2>' +
           proposalsTable(f.proposals, 'Nenhuma proposta deste CPF.') +
           '<h2 style="margin-top:18px">Cadastro na Função</h2>' +
@@ -4045,6 +4133,7 @@
           '</div>'
         bindHistory()
         document.getElementById('btn-voltar-func').onclick = back
+        paintEmployeeContracts(id, f.cpf.replace(/\D/g, ''), back, isCurrent)
         document.getElementById('btn-funcao-func').onclick = (ev) => withButton(ev.currentTarget, 'Consultando…', async () => {
           clearError('erro-funcao-func')
           const base = '/admin/employees/' + encodeURIComponent(id) + '/funcao/'
