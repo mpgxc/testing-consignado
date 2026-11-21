@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Consignado Privado — proposta</title>
+  <title>Consignado Privado: proposta</title>
   <!--
   Proposta consignada (Especificacao Tecnica "Integracao Proposta Consignado") em arquivo unico,
   sem build e sem dependencia, falando direto com a API do buni.ms.loans (prefixo /api). Tres
@@ -17,7 +17,10 @@
       # http://localhost:5179/consignado.html
 
   A base da API fica no campo do cabecalho (default http://localhost:3010/api), gravada em
-  localStorage. De outra maquina (ngrok): exponha a API (`ngrok http 3010`) e a pasta estatica, e
+  localStorage. Pelo backend do bankeiro: a engrenagem do cabecalho (Conexao) guarda a base do app
+  (Colaborador) e a do backoffice (Backoffice, com tenantid e device-id do TOTP), cada uma com seu Bearer, e as chamadas dessas visoes
+  vao para la nas mesmas rotas (sem o /api); base vazia = direto no ms.loans. Developer e health
+  sempre direto no ms.loans. De outra maquina (ngrok): exponha a API (`ngrok http 3010`) e a pasta estatica, e
   troque o campo para https://<tunel-da-api>/api. Upload de planilha nao funciona assim: a URL
   pre-assinada aponta para S3_ENDPOINT (localhost:4570). Auto-check: abra consignado.html#selftest.
 -->
@@ -176,7 +179,7 @@
       font-size: 12.5px;
       background: var(--muted);
       border-radius: 5px;
-      padding: 1px 5px;
+      padding: 2px 6px;
     }
 
     pre {
@@ -227,7 +230,7 @@
       border-radius: calc(var(--radius) - 2px);
       background: var(--mode);
       color: #fff;
-      transition: background-color .2s;
+      transition: background-color .15s ease-out;
     }
 
     .marca {
@@ -249,7 +252,7 @@
       display: inline-flex;
       align-items: center;
       height: 36px;
-      padding: 3px;
+      padding: 4px;
       border-radius: var(--radius);
       background: var(--muted);
     }
@@ -332,6 +335,26 @@
 
     .saude:empty {
       display: none;
+    }
+
+    /* Dialog (shadcn): conexao com o backend. */
+    dialog.conexao {
+      width: min(560px, calc(100% - 32px));
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--card);
+      color: var(--foreground);
+      box-shadow: 0 10px 30px rgb(0 0 0 / .2);
+    }
+
+    dialog.conexao::backdrop {
+      background: rgb(0 0 0 / .5);
+    }
+
+    dialog.conexao h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
     }
 
     /* Button outline, tamanho icon. */
@@ -440,7 +463,7 @@
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 1px;
+      gap: 2px;
       color: var(--muted-foreground);
     }
 
@@ -521,29 +544,7 @@
 
     .rail .neutra .seg {
       background: repeating-linear-gradient(135deg, var(--muted) 0 3px, transparent 3px 6px);
-      box-shadow: inset 0 0 0 1px var(--muted);
-    }
-
-    /* O unico movimento da pagina: a faixa atual brilha enquanto o servico ou a instituicao trabalha
-       (e a tela se atualiza sozinha). Na vez do colaborador ela fica parada, esperando por ele. */
-    @keyframes rail-live {
-      from {
-        transform: translateX(-100%);
-      }
-
-      to {
-        transform: translateX(100%);
-      }
-    }
-
-    @media (prefers-reduced-motion: no-preference) {
-      .rail .atual:is(.by-service, .by-institution) .seg::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(90deg, transparent, color-mix(in oklab, white 60%, transparent), transparent);
-        animation: rail-live 1.6s ease-in-out infinite;
-      }
+      border: 1px solid var(--muted);
     }
 
     .rail-summary {
@@ -567,7 +568,7 @@
     }
 
     .detail-rail {
-      margin: 18px 0 22px;
+      margin: 16px 0 24px;
     }
 
     .sr-only {
@@ -638,15 +639,6 @@
     /* ---------- conteudo ---------- */
     main {
       padding-bottom: 64px;
-    }
-
-    /* O portal e tabela e usa a largura toda; a jornada do colaborador e formulario e fica numa
-       coluna de 720px no centro — la a linha curta ajuda a leitura. */
-    body:not(.admin) main,
-    body:not(.admin) .page-top {
-      max-width: 720px;
-      margin-left: auto;
-      margin-right: auto;
     }
 
     /* Card. */
@@ -813,7 +805,7 @@
       font: inherit;
       font-size: 14px;
       box-shadow: var(--shadow-xs);
-      transition: border-color .15s, box-shadow .15s;
+      transition: border-color .15s ease-out, box-shadow .15s ease-out;
     }
 
     input::placeholder {
@@ -944,7 +936,7 @@
       font-weight: 500;
       white-space: nowrap;
       cursor: pointer;
-      transition: background-color .15s, border-color .15s, opacity .15s;
+      transition: background-color .15s ease-out, border-color .15s ease-out, opacity .15s ease-out;
     }
 
     button.acao:hover {
@@ -1052,9 +1044,9 @@
     .tag {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       width: fit-content;
-      padding: 1px 8px 1px 6px;
+      padding: 2px 8px 2px 6px;
       border: 1px solid var(--border);
       border-radius: calc(var(--radius) - 2px);
       color: var(--foreground);
@@ -1360,7 +1352,6 @@
     tr.atual .tl-mark span {
       border-color: var(--actor);
       background: var(--actor);
-      box-shadow: 0 0 0 4px color-mix(in oklab, var(--actor) 22%, transparent);
     }
 
     tr.falha .tl-mark span {
@@ -1557,9 +1548,17 @@
         <button role="tab" id="app-dev" data-modo="dev" title="Filas, DLQ, lotes, Função e Certta">Developer</button>
       </div>
       <div class="api-cfg">
-        <label for="api-base">API</label>
+        <label for="api-base">ms.loans</label>
         <input id="api-base" spellcheck="false">
         <span class="saude" id="saude"></span>
+        <button class="icon-btn" id="btn-conexao" type="button" aria-label="Conexão com o backend"
+          title="Conexão com o backend (app e backoffice)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
       </div>
       <button class="icon-btn" id="btn-tema" type="button" aria-label="Alternar tema claro/escuro"
         title="Alternar tema claro/escuro">
@@ -1588,6 +1587,24 @@
     </div>
     <main id="app"></main>
   </div>
+  <dialog id="dlg-conexao" class="conexao" aria-labelledby="dlg-conexao-titulo">
+    <form method="dialog">
+      <h2 id="dlg-conexao-titulo">Conexão com o backend</h2>
+      <p class="hint">Com a base preenchida, o Colaborador fala com o app e o Backoffice com o backoffice, nas mesmas
+        rotas. No app vale o CPF da conta do token, não o digitado. Base vazia: direto no ms.loans. O Developer fala
+        sempre direto com o ms.loans.</p>
+      <div class="grid form">
+        <div><label for="cfg-appBase">Base do app</label><input id="cfg-appBase" spellcheck="false" placeholder="http://localhost:4545"></div>
+        <div><label for="cfg-appToken">Token do cliente</label><input id="cfg-appToken" spellcheck="false" placeholder="JWT, sem o Bearer"></div>
+        <div><label for="cfg-boBase">Base do backoffice</label><input id="cfg-boBase" spellcheck="false" placeholder="http://localhost:4546"></div>
+        <div><label for="cfg-boToken">Token do operador</label><input id="cfg-boToken" spellcheck="false" placeholder="JWT, sem o Bearer"></div>
+        <div><label for="cfg-boTenant">Header tenantid</label><input id="cfg-boTenant" spellcheck="false" placeholder="tenant do backoffice"></div>
+        <div><label for="cfg-boDevice">Header device-id</label><input id="cfg-boDevice" spellcheck="false" placeholder="device com TOTP validado"></div>
+      </div>
+      <div style="height:16px"></div>
+      <button class="acao">Fechar</button>
+    </form>
+  </dialog>
   <script>
     'use strict'
 
@@ -1605,6 +1622,39 @@
     const NGROK = { 'ngrok-skip-browser-warning': '1' }
 
     /**
+     * Conexao com o backend do bankeiro (engrenagem do cabecalho), gravada em localStorage. O Colaborador
+     * vai ao app e o Backoffice ao backoffice, cada um com seu Bearer; base vazia = direto no ms.loans.
+     */
+    const BACKEND_FIELDS = ['appBase', 'appToken', 'boBase', 'boToken', 'boTenant', 'boDevice']
+    const backend = (k) => {
+      try { return (localStorage.getItem('buniBackend.' + k) || '').trim() } catch { return '' }
+    }
+    for (const k of BACKEND_FIELDS) {
+      const el = document.getElementById('cfg-' + k)
+      el.value = backend(k)
+      el.oninput = () => {
+        try { localStorage.setItem('buniBackend.' + k, el.value.trim()) } catch { /* sem storage: vale so nesta aba */ }
+      }
+    }
+    const dlgConexao = document.getElementById('dlg-conexao')
+    document.getElementById('btn-conexao').onclick = () => dlgConexao.showModal()
+    dlgConexao.addEventListener('close', () => applyMode())
+
+    /** Para onde vai a chamada da visao atual: o backend (com Bearer e tenantid) ou o ms.loans direto. */
+    function apiTarget() {
+      const mode = currentMode()
+      const side = mode === 'colaborador' ? 'app' : mode === 'admin' ? 'bo' : null
+      const base = side ? backend(side + 'Base') : ''
+      if (!base) return { base: apiInput.value, headers: {} }
+      const headers = {}
+      if (backend(side + 'Token')) headers.Authorization = 'Bearer ' + backend(side + 'Token')
+      if (side === 'bo' && backend('boTenant')) headers.tenantid = backend('boTenant')
+      // O backoffice exige o TOTP do admin (adminTotp): o device precisa estar validado para o operador.
+      if (side === 'bo' && backend('boDevice')) headers['device-id'] = backend('boDevice')
+      return { base, headers }
+    }
+
+    /**
      * A API nao usa envelope: sucesso e o proprio objeto, erro e um HTTP != 2xx em
      * `application/problem+json` — `title` e a mensagem publica.
      *
@@ -1620,18 +1670,22 @@
       const m = body && (body.title || body.message)
       if (Array.isArray(m)) return m.join(' ')
       if (typeof m === 'string' && m) return body.detail ? m + ' ' + body.detail : m
+      if (status === 401 || status === 403) return 'Sem acesso no backend: confira token, tenantid e device-id em Conexão (engrenagem).'
+      // BusinessError do backend: 400 { error: 'codigo_snake' } (ex.: required_totp_validation no backoffice).
+      if (body && typeof body.error === 'string') return 'Backend recusou: ' + body.error + '.'
       return status >= 500 ? 'Serviço indisponível agora. Tente novamente.' : 'Não foi possível concluir a operação.'
     }
 
     async function api(method, path, body, headers) {
-      const base = apiInput.value.replace(/\/$/, '')
+      const target = apiTarget()
+      const base = target.base.replace(/\/$/, '')
       let res
       try {
         res = await fetch(base + path, {
           method,
           // Status da esteira vem da Funcao a cada GET: nunca servir resposta guardada pelo navegador.
           cache: 'no-store',
-          headers: Object.assign({}, NGROK, body ? { 'Content-Type': 'application/json' } : null, headers),
+          headers: Object.assign({}, NGROK, body ? { 'Content-Type': 'application/json' } : null, target.headers, headers),
           body: body ? JSON.stringify(body) : undefined,
         })
       } catch {
@@ -1901,7 +1955,7 @@
       if (!pipeline) return ''
       const reasons = (pipeline.reasons || []).map((m) => m.description || m.code).filter(Boolean).join('; ')
       return '<div id="esteira">' + boxes([
-        { label: 'Na Função', value: (PIPELINE_STATUS_LABEL[pipeline.status] || pipeline.status) + (pipeline.activityDescription ? ' — ' + pipeline.activityDescription : '') },
+        { label: 'Na Função', value: (PIPELINE_STATUS_LABEL[pipeline.status] || pipeline.status) + (pipeline.activityDescription ? ': ' + pipeline.activityDescription : '') },
         ...(reasons ? [{ label: 'Motivos', value: reasons }] : []),
       ]) + '</div>'
     }
@@ -1992,6 +2046,7 @@
       ORIGIN5_NOT_FOUND: 'Filial (Origem5) não cadastrada',
       ORIGIN5_AMBIGUOUS: 'Mais de uma filial (Origem5) com o CNPJ',
       ORIGIN4_INACTIVE: 'Empregador (Origem4) inativo na Função',
+      ORIGIN3_NOT_FOUND: 'Origem3 do empregador não cadastrada na Função',
       ORIGIN_CATALOG_UNAVAILABLE: 'Catálogo de origens da Função indisponível',
       ORIGIN_MAPPING_UNAVAILABLE: 'Mapa de origens indisponível',
       REFERENCE_DATA_UNAVAILABLE: 'Dado de referência indisponível',
@@ -2006,8 +2061,7 @@
       CONDITION_SUPERSEDED: 'Condição substituída por simulação mais nova',
       CONDITION_EXPIRED: 'Condição vencida',
       NO_CONDITION_SELECTED: 'Nenhuma condição escolhida',
-      TERM_NOT_OFFERED: 'Prazo fora da tabela de prazos',
-      AMOUNT_OUT_OF_RANGE: 'Valor fora da faixa do prazo',
+      AMOUNT_OUT_OF_RANGE: 'Valor fora da faixa permitida',
       OUTSIDE_CREDIT_POLICY: 'Fora da política de crédito',
       CHECK_FAILED: 'Falha ao consultar o Cliente PF',
       CUSTOMER_DATA_MISSING: 'Cadastro do colaborador incompleto',
@@ -2073,7 +2127,7 @@
     function agreementText(agreement, tenureYears) {
       if (!agreement) return '—'
       const { code, tenureMinYears: min, tenureMaxYears: max } = agreement
-      const band = min == null ? '' : max == null ? ' — ' + min + ' anos de casa ou mais' : ' — de ' + min + ' a ' + max + ' anos de casa'
+      const band = min == null ? '' : max == null ? ', ' + min + ' anos de casa ou mais' : ', de ' + min + ' a ' + max + ' anos de casa'
       return 'Convênio ' + code + band + (tenureYears == null ? '' : ' (você tem ' + tenureYears + (tenureYears === 1 ? ' ano' : ' anos') + ')')
     }
 
@@ -2258,12 +2312,13 @@
       app.innerHTML =
         '<div class="card">' +
         '<h1>Simule seu consignado</h1>' +
-        '<p class="hint">Só o CPF: encontramos sua matrícula (a de admissão mais antiga, se houver mais de uma), o convênio pelo seu tempo de casa e simulamos com 30% do seu salário no maior prazo do convênio. Na oferta, você pode trocar o prazo e pedir um valor menor. Se você já tem uma proposta em andamento, voltamos para ela. Para ver seus contratos ativos e o andamento das suas propostas, use <strong>Meus contratos e propostas</strong>.</p>' +
+        '<p class="hint">A simulação usa seu vínculo mais antigo, considera seu tempo de casa e parte de 30% do salário no maior prazo do convênio. Você pode trocar o prazo ou pedir um valor menor. Para consultar propostas e contratos ativos, use <strong>Meus contratos e propostas</strong>.</p>' +
         '<div class="grid form"><div>' +
         '<label for="cpf">CPF <span class="req">*</span></label>' +
         '<input id="cpf" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00">' +
         '</div></div>' +
-        '<div style="height:14px"></div>' +
+        (backend('appBase') ? '<p class="hint" style="margin:12px 0 0">Pelo app: vale o CPF da conta do token; o digitado aqui não vai ao ms.loans.</p>' : '') +
+        '<div style="height:16px"></div>' +
         alertBox('erro-cpf') +
         '<button class="acao" id="btn-cpf">Simular</button><div style="height:10px"></div>' +
         '<button class="acao sec" id="btn-acompanhar">Meus contratos e propostas</button>' +
@@ -2327,7 +2382,7 @@
         '<h2>Propostas (' + proposals.length + ')</h2>' +
         proposalsList(proposals) +
         '</div>' +
-        '<div style="height:14px"></div><button class="acao sec" id="btn-voltar-cpf">Voltar</button>' +
+        '<div style="height:16px"></div><button class="acao sec" id="btn-voltar-cpf">Voltar</button>' +
         '</div>'
 
       document.getElementById('btn-voltar-cpf').onclick = () => {
@@ -2383,18 +2438,18 @@
           { label: 'Parcelas pagas', value: countOrDash(c.paidInstallments) },
           { label: 'Parcelas em aberto', value: countOrDash(c.openInstallments) },
         ]) +
-        '<h2 style="margin-top:18px">Valores</h2>' +
+        '<h2 style="margin-top:16px">Valores</h2>' +
         boxes([
           { label: 'Principal em aberto', value: money(c.principalAmount), sub: 'Sem juros e taxas, só parcelas em aberto' },
           { label: 'Saldo bruto em aberto', value: money(c.grossAmount) },
           { label: 'IOF', value: money(c.iofAmount) },
         ]) +
-        '<h2 style="margin-top:18px">Taxas</h2>' +
+        '<h2 style="margin-top:16px">Taxas</h2>' +
         boxes([
           { label: 'CET', value: yearlyPercent(c.yearlyCet) },
           { label: 'Taxa nominal', value: yearlyPercent(c.yearlyRate) },
         ]) +
-        '<h2 style="margin-top:18px">Datas</h2>' +
+        '<h2 style="margin-top:16px">Datas</h2>' +
         boxes([
           { label: 'Data base', value: formatDate(c.baseDate) },
           { label: 'Liberação do crédito', value: formatDate(c.releaseDate) },
@@ -2402,7 +2457,7 @@
           { label: 'Último vencimento', value: formatDate(c.lastDueDate) },
           ...(c.settledOn ? [{ label: 'Liquidação', value: formatDate(c.settledOn) }] : []),
         ]) +
-        '<div style="height:14px"></div><button class="acao sec" id="btn-voltar-area">Voltar</button>' +
+        '<div style="height:16px"></div><button class="acao sec" id="btn-voltar-area">Voltar</button>' +
         '</div>'
       document.getElementById('btn-voltar-area').onclick = back
       window.scrollTo(0, 0)
@@ -2439,17 +2494,22 @@
       if (p.requestedInstallment == null) return null
       const salary = p.employee && p.employee.salary
       return salary > 0
-        ? 'Parcela pedida à instituição — 30% do seu salário de ' + brl(salary)
-        : 'Parcela pedida à instituição — 30% da renda estimada (sua base não informa salário)'
+        ? 'Parcela pedida à instituição: 30% do seu salário de ' + brl(salary)
+        : 'Parcela pedida à instituição: 30% da renda estimada (sua base não informa salário)'
     }
 
     /** Crédito máximo (RF-PRE-001): a oferta de maior valor como a Função devolveu — só escolhida aqui. */
     const bestOffer = (offers) => (offers || []).reduce((best, o) => (!best || o.requestedAmount > best.requestedAmount ? o : best), null)
 
-    // Oferta do ajuste (requote) nao tem parcela pedida: o valor e o escolhido, nao o maximo.
-    const offerHeadline = (p) => (p.requestedInstallment == null ? 'Valor escolhido por você' : 'Crédito máximo disponível')
+    /** Oferta em destaque: a do prazo que o colaborador marcou ou, sem marca (ou marca de outra cotação), a de maior valor. */
+    const chosenOffer = (offers, offerId) => (offers || []).find((o) => o.offerId === offerId) || bestOffer(offers)
 
-    /** Valor do ajuste em centavos, entre o minimo e o maximo do prazo; fora disso a API ou a Funcao recusariam. */
+    // Oferta do ajuste (requote) nao tem parcela pedida: e a do valor ou parcela escolhidos, nao o maximo.
+    const offerHeadline = (p) => (p.requestedInstallment == null ? 'Valor do empréstimo' : 'Crédito máximo disponível')
+
+    const monthlyPercent = (n) => Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%'
+
+    /** Valor do ajuste em centavos, entre o minimo e o maximo; fora disso a API ou a Funcao recusariam. */
     function checkRequoteAmount(raw, min, max) {
       const amount = Math.round(parseBrNumber(raw) * 100) / 100
       return amount >= min && amount <= max ? { amount } : { error: 'Informe um valor entre ' + brl(min) + ' e ' + brl(max) + '.' }
@@ -2458,68 +2518,57 @@
     /** Faixa do prazo (`/options`): o minimo vem da Funcao (parcela de R$ 50), nunca abaixo do piso de R$ 500. */
     const termRange = (t, floor) => ({ min: Math.max(floor, t.minAmount || floor), max: t.availableAmount })
 
-    // Trocar de prazo nao apaga o valor escolhido: so o traz para a faixa do novo prazo. Vazio vira o maximo.
+    /** Faixa do valor pela tabela de prazos: do menor minimo ao maior maximo (o prazo que nao comporta o valor fica fora da cotacao). */
+    function requoteRange(table) {
+      const rows = table.options.map((t) => termRange(t, table.minAmount))
+      return { min: Math.min(...rows.map((r) => r.min)), max: Math.max(...rows.map((r) => r.max)) }
+    }
+
+    // Valor fora da faixa vem para a ponta; vazio vira o maximo.
     const clampAmount = (value, min, max) => (Number.isFinite(value) && value > 0 ? Math.min(max, Math.max(min, value)) : max)
 
     function requoteForm(table, current) {
       if (!table.options.length) return '<p class="hint">A instituição não aceitou nenhum prazo agora. Fique com a oferta acima ou tente mais tarde.</p>'
-      const chosen = table.options.find((t) => t.installmentCount === current.installmentCount) || table.options[0]
-      const range = termRange(chosen, table.minAmount)
+      const range = requoteRange(table)
       const value = clampAmount(current.requestedAmount, range.min, range.max)
-      return '<fieldset style="margin-bottom:14px"><legend>Prazo</legend><div class="grid">' +
-        table.options.map((t) => {
-          const r = termRange(t, table.minAmount)
-          return '<label class="box prazo"><input type="radio" name="prazo" value="' + esc(t.installmentCount) + '" data-min="' + esc(r.min) + '" data-max="' + esc(r.max) + '"' +
-            (t === chosen ? ' checked' : '') + '><span>' + esc(t.installmentCount + 'x · até ' + brl(t.availableAmount)) +
-            (t.installmentAmount ? '<span class="sub">parcela de ' + esc(brl(t.installmentAmount)) + ' no valor máximo</span>' : '') + '</span></label>'
-        }).join('') +
-        '</div></fieldset>' +
-        formField('valor-ajuste', 'Valor desejado', '<input id="valor-ajuste" type="number" inputmode="decimal" step="0.01" min="' + esc(range.min) +
-          '" max="' + esc(range.max) + '" value="' + esc(value) + '">' +
-          '<input id="valor-ajuste-faixa" type="range" step="any" min="' + esc(range.min) + '" max="' + esc(range.max) + '" value="' + esc(value) + '" aria-label="Valor desejado">') +
-        '<p class="hint" id="faixa-ajuste" style="margin-top:6px"></p>' +
-        '<button class="acao" id="btn-simular">Simular</button>'
+      const terms = table.options.map((t) => t.installmentCount + 'x').join(', ')
+      return formField('valor-ajuste', 'Valor do empréstimo', '<input id="valor-ajuste" type="number" inputmode="decimal" step="0.01" min="' + esc(range.min) +
+        '" max="' + esc(range.max) + '" value="' + esc(value) + '">' +
+        '<input id="valor-ajuste-faixa" type="range" step="any" min="' + esc(range.min) + '" max="' + esc(range.max) + '" value="' + esc(value) +
+        '" aria-label="Valor do empréstimo">') +
+        '<p class="hint" id="faixa-ajuste" style="margin-top:6px">' + esc('De ' + brl(range.min) + ' a ' + brl(range.max) +
+          '. A instituição cota esse valor em cada prazo (' + terms + ') e recalcula parcela, IOF e CET; o prazo que não comporta o valor fica de fora.') + '</p>' +
+        '<button class="acao" id="btn-simular">Simular em todos os prazos</button>'
     }
 
-    function bindRequote(table, isCurrent) {
+    // O valor inicial e o da oferta em destaque na hora de abrir, nao o da pintura.
+    function showRequote(table, isCurrent) {
+      document.getElementById('prazos').innerHTML = requoteForm(table, chosenOffer(S.proposal.offers, S.chosenOfferId))
+      bindRequote(isCurrent)
+    }
+
+    function bindRequote(isCurrent) {
       const amount = document.getElementById('valor-ajuste')
       if (!amount) return
       const slider = document.getElementById('valor-ajuste-faixa')
-      const paintRange = () => {
-        document.getElementById('faixa-ajuste').textContent = 'Neste prazo, de ' + brl(Number(amount.min)) + ' a ' + brl(Number(amount.max)) +
-          '. A instituição recalcula parcela, IOF e CET. Prazo longo pede valor maior (parcela mínima de R$ 50); ' +
-          'em prazo curto, valor baixo pode ser recusado pelo custo efetivo.'
-      }
-      // Slider em reais inteiros; as pontas ficam exatas (o maximo do prazo pode ter centavos).
+      // Slider em reais inteiros; as pontas ficam exatas (o maximo pode ter centavos).
       slider.oninput = () => {
         const v = Number(slider.value)
         const max = Number(slider.max)
         amount.value = v >= max ? max : Math.min(max, Math.max(Number(slider.min), Math.round(v)))
       }
       amount.oninput = () => { slider.value = amount.value }
-      for (const r of document.querySelectorAll('input[name="prazo"]')) {
-        r.onchange = () => {
-          const min = Number(r.dataset.min)
-          const max = Number(r.dataset.max)
-          const value = clampAmount(parseBrNumber(amount.value), min, max)
-          for (const el of [amount, slider]) { el.min = min; el.max = max }
-          amount.value = value
-          slider.value = value
-          paintRange()
-        }
-      }
-      paintRange()
       document.getElementById('btn-simular').onclick = (ev) => withButton(ev.currentTarget, 'Simulando…', async () => {
         clearError('erro-ajuste')
-        const term = document.querySelector('input[name="prazo"]:checked')
-        const checked = checkRequoteAmount(amount.value, Number(term.dataset.min), Number(term.dataset.max))
+        const checked = checkRequoteAmount(amount.value, Number(amount.min), Number(amount.max))
         if (checked.error) return showError('erro-ajuste', checked.error)
         const id = S.proposalId
         // Escolher no meio do ajuste pegaria a oferta que ele vai substituir.
-        const locked = document.querySelectorAll('#oferta button, #btn-cancelar, #btn-voltar')
+        const locked = document.querySelectorAll('#oferta button, #oferta input, #ajuste input, #btn-cancelar, #btn-voltar')
         for (const b of locked) b.disabled = true
         try {
-          await api('POST', '/proposals/' + id + '/requote', { installmentCount: Number(term.value), requestedAmount: checked.amount })
+          await api('POST', '/proposals/' + id + '/requote', { requestedAmount: checked.amount })
+          S.chosenOfferId = null
           route(await loadProposal(id), isCurrent)
         } catch (err) {
           if (isCurrent()) showError('erro-ajuste', err.message)
@@ -2533,41 +2582,54 @@
       boxes([
         { label: 'Parcela mensal', value: brl(o.installmentAmount) },
         { label: 'Nº de parcelas', value: o.installmentCount + 'x' },
-        { label: 'CET (a.m.)', value: Number(o.monthlyCet).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' },
+        { label: 'CET (a.m.)', value: monthlyPercent(o.monthlyCet) },
         { label: 'IOF', value: brl(o.iofAmount) },
         { label: 'Valor total', value: brl(o.totalAmount) },
         { label: '1º vencimento', value: formatDate(o.firstDueDate) },
         { label: 'Último vencimento', value: formatDate(o.lastDueDate) },
       ])
 
+    /** Um cartao por prazo da cotacao: com o ajuste, a Funcao devolve uma oferta em cada prazo. */
+    const termCard = (o, chosen) =>
+      '<label class="box prazo"><input type="radio" name="oferta-prazo" value="' + esc(o.offerId) + '"' + (o === chosen ? ' checked' : '') + '><span>' +
+      esc(o.installmentCount + 'x de ' + brl(o.installmentAmount)) +
+      '<span class="sub">' + esc(brl(o.requestedAmount) + ' · CET ' + monthlyPercent(o.monthlyCet) + ' a.m.') + '</span></span></label>'
+
+    const offerDetail = (p, o) =>
+      '<div class="box destaque" id="credito-maximo" style="margin-bottom:10px"><div class="rot">' + esc(offerHeadline(p)) + '</div><div class="val">' + esc(brl(o.requestedAmount)) + '</div></div>' +
+      offerBoxes(o) +
+      // A Funcao confirma os 30% ou devolve um limite: a margem do CPF ou o teto de valor do produto
+      // (003031-003034). Nos dois a condicao vem com parcela menor, e a tela diz por que — senao os
+      // dois valores se contradizem. "Limite disponivel" cobre os dois: nem sempre e o convenio.
+      (p.requestedInstallment != null && o.installmentAmount < p.requestedInstallment
+        ? '<div class="aviso info" id="margem-ajustada">A instituição ajustou a parcela ao limite disponível.</div>'
+        : '') +
+      '<button class="acao coral" data-oferta="' + esc(o.offerId) + '">Quero esta oferta</button>'
+
     function offerScreen(isCurrent) {
       const p = S.proposal
       if (!p) return restart()
       const c = p.employee || {}
-      const o = bestOffer(p.offers)
+      const o = chosenOffer(p.offers, S.chosenOfferId)
+      const terms = [...(p.offers || [])].sort((a, b) => a.installmentCount - b.installmentCount)
 
       app.innerHTML =
         '<div class="card condicao" id="oferta">' +
         '<div class="cab-card"><h1>Sua oferta</h1>' + tagStatus(p.status) + '</div>' +
-        '<p class="hint">Simulação real na Função com o seu cadastro na empresa — nada é calculado no navegador.</p>' +
+        '<p class="hint">A Função simula sua proposta com o cadastro da empresa. O navegador não calcula a oferta.</p>' +
         alertBox('erro-prop', takeNotice()) +
         (o
-          ? '<div class="box destaque" id="credito-maximo" style="margin-bottom:10px"><div class="rot">' + esc(offerHeadline(p)) + '</div><div class="val">' + esc(brl(o.requestedAmount)) + '</div></div>' +
-          offerBoxes(o) +
-          // A Funcao confirma os 30% ou devolve um limite: a margem do CPF ou o teto de valor do produto
-          // (003031-003034). Nos dois a condicao vem com parcela menor, e a tela diz por que — senao os
-          // dois valores se contradizem. "Limite disponivel" cobre os dois: nem sempre e o convenio.
-          (p.requestedInstallment != null && o.installmentAmount < p.requestedInstallment
-            ? '<div class="aviso info" id="margem-ajustada">A instituição ajustou a parcela ao limite disponível.</div>'
+          ? (terms.length > 1
+            ? '<fieldset style="margin-bottom:16px"><legend>Prazo</legend><div class="grid">' + terms.map((t) => termCard(t, o)).join('') + '</div></fieldset>'
             : '') +
-          '<button class="acao coral" data-oferta="' + esc(o.offerId) + '">Quero esta oferta</button>'
+          '<div id="oferta-detalhe">' + offerDetail(p, o) + '</div>'
           : '<div class="aviso info">Não há oferta disponível nesta simulação. Faça uma nova consulta pelo CPF.</div>') +
         '</div>' +
         (o
-          ? '<div class="card" id="ajuste"><h2>Ajustar prazo e valor</h2>' +
-          '<p class="hint">Prefere menos parcelas ou um valor menor? Veja os prazos que a instituição aceita para você.</p>' +
+          ? '<div class="card" id="ajuste"><h2>Ajustar valor</h2>' +
+          '<p class="hint">Prefere um valor menor? A instituição cota o valor escolhido em todos os prazos que aceita para você.</p>' +
           alertBox('erro-ajuste') +
-          '<div id="prazos"><button class="acao sec" id="btn-ver-prazos">Ver prazos</button></div>' +
+          '<div id="prazos"><button class="acao sec" id="btn-ver-prazos">Ajustar</button></div>' +
           '</div>'
           : '') +
         '<div class="card">' +
@@ -2584,33 +2646,45 @@
         '<button class="acao sec" id="btn-cancelar">Cancelar proposta</button>'
 
       // Escolher nao envia nada a Funcao: os dados sempre passam pela tela de Dados antes do envio.
-      for (const b of document.querySelectorAll('[data-oferta]')) {
-        b.onclick = (ev) => withButton(ev.currentTarget, 'Escolhendo…', async () => {
-          const id = S.proposalId
-          // Um ajuste no meio da escolha substituiria a oferta escolhida.
-          const locked = document.querySelectorAll('#ajuste button')
-          for (const x of locked) x.disabled = true
-          try {
-            await api('POST', '/proposals/' + id + '/offer', { offerId: b.dataset.oferta })
-            route(await loadProposal(id), isCurrent, { step: 3 })
-          } catch (err) {
-            if (isCurrent()) showError('erro-prop', err.message)
-          } finally {
-            for (const x of locked) x.disabled = false
-          }
-        })
+      const bindChoose = () => {
+        for (const b of document.querySelectorAll('[data-oferta]')) {
+          b.onclick = (ev) => withButton(ev.currentTarget, 'Escolhendo…', async () => {
+            const id = S.proposalId
+            // Um ajuste no meio da escolha substituiria a oferta escolhida.
+            const locked = document.querySelectorAll('#ajuste button, #ajuste input, #oferta input')
+            for (const x of locked) x.disabled = true
+            try {
+              await api('POST', '/proposals/' + id + '/offer', { offerId: b.dataset.oferta })
+              route(await loadProposal(id), isCurrent, { step: 3 })
+            } catch (err) {
+              if (isCurrent()) showError('erro-prop', err.message)
+            } finally {
+              for (const x of locked) x.disabled = false
+            }
+          })
+        }
+      }
+      bindChoose()
+      for (const r of document.querySelectorAll('input[name="oferta-prazo"]')) {
+        r.onchange = () => {
+          S.chosenOfferId = r.value
+          document.getElementById('oferta-detalhe').innerHTML = offerDetail(p, chosenOffer(p.offers, r.value))
+          bindChoose()
+        }
       }
       document.getElementById('btn-cancelar').onclick = (ev) => cancelProposal(ev.currentTarget, 'erro-prop', isCurrent)
-      const seeTerms = document.getElementById('btn-ver-prazos')
-      if (!seeTerms) return
+      if (!o) return
+      // A tabela de prazos vem da margem, que o ajuste nao muda: uma consulta por proposta basta.
+      if (S.offerTable && S.offerTable.proposalId === S.proposalId) return showRequote(S.offerTable.table, isCurrent)
       // Uma simulacao na Funcao por prazo: demora, e so roda quando o colaborador pede.
-      seeTerms.onclick = (ev) => withButton(ev.currentTarget, 'Consultando prazos…', async () => {
+      document.getElementById('btn-ver-prazos').onclick = (ev) => withButton(ev.currentTarget, 'Consultando prazos…', async () => {
         clearError('erro-ajuste')
+        const id = S.proposalId
         try {
-          const table = await api('POST', '/proposals/' + S.proposalId + '/options')
+          const table = await api('POST', '/proposals/' + id + '/options')
           if (!isCurrent()) return
-          document.getElementById('prazos').innerHTML = requoteForm(table, o)
-          bindRequote(table, isCurrent)
+          S.offerTable = { proposalId: id, table }
+          showRequote(table, isCurrent)
         } catch (err) {
           if (isCurrent()) showError('erro-ajuste', err.message)
         }
@@ -2682,7 +2756,7 @@
         '</div>'
     }
 
-    const addressText = (k) => [k.street, k.streetNumber].filter(Boolean).join(', ') + (k.postalCode ? ' — CEP ' + formatPostalCode(k.postalCode) : '')
+    const addressText = (k) => [k.street, k.streetNumber].filter(Boolean).join(', ') + (k.postalCode ? ', CEP ' + formatPostalCode(k.postalCode) : '')
     const bankText = (k) => [k.bankCode && 'Banco ' + k.bankCode, k.bankBranch && 'Agência ' + k.bankBranch, k.bankAccount && 'Conta ' + k.bankAccount].filter(Boolean).join(' · ')
 
     function customerDataScreen(isCurrent) {
@@ -2734,7 +2808,7 @@
           formField('correctedBankAccount', 'Conta (sem dígito)', textInput('correctedBankAccount', f.correctedBankAccount)),
           ['correctedBankCode', 'correctedBankBranch', 'correctedBankAccount'].some(isMissing)) +
         '</div>' +
-        '<p class="hint">Nome, nascimento, empresa, matrícula, admissão e salário vêm do seu cadastro na empresa — para corrigir, fale com o RH. Telefone, endereço e dados bancários você mesmo altera aqui (a correção fica só nesta jornada, não reescreve a base). O crédito só pode ser depositado em conta b.Uni (banco 530): se a sua conta cadastrada é de outro banco, informe a conta b.Uni.</p>' +
+        '<p class="hint">Nome, nascimento, empresa, matrícula, admissão e salário vêm do cadastro da empresa. Para corrigir esses dados, fale com o RH. Você pode alterar telefone, endereço e conta nesta proposta; as alterações não atualizam a base. O crédito só pode ser depositado em conta b.Uni (banco 530). Se sua conta cadastrada é de outro banco, informe a conta b.Uni.</p>' +
 
         '<fieldset><legend>Dados pessoais</legend><div class="grid form">' +
         (isMissing('sex') ? formField('sex', 'Sexo', selectInput('sex', f.sex, Object.entries(SEX_LABEL), true), true) : '') +
@@ -2803,8 +2877,8 @@
           fill('state', e.state)
         } catch (err) {
           status.textContent = err.code === 'CEP_NOT_FOUND'
-            ? 'CEP não encontrado — preencha os campos manualmente.'
-            : 'Não foi possível consultar o CEP agora — preencha os campos manualmente.'
+            ? 'CEP não encontrado. Preencha os campos manualmente.'
+            : 'Não foi possível consultar o CEP agora. Preencha os campos manualmente.'
         }
       }
 
@@ -3149,13 +3223,13 @@
       app.innerHTML =
         '<div class="card">' +
         '<h1>Propostas</h1>' +
-        '<p class="hint">Status na visão do colaborador e a etapa em que cada uma está; passe o mouse no status ou no motivo para ver o código interno. Para dar suporte, busque pelo CPF ou abra o histórico pelo id que o colaborador informar.</p>' +
-        '<div class="linha" style="margin-bottom:14px">' +
+        '<p class="hint">Passe o mouse no status ou no motivo para ver o código interno. Para suporte, busque pelo CPF ou abra o histórico pelo ID informado.</p>' +
+        '<div class="linha" style="margin-bottom:16px">' +
         '<input id="busca-id" placeholder="id da proposta (uuid)" spellcheck="false">' +
         '<button class="acao" id="btn-busca" style="flex:0 0 160px">Abrir histórico</button>' +
         '</div>' +
         alertBox('erro-busca') +
-        '<div class="linha" id="filtros-propostas" style="margin-bottom:14px">' +
+        '<div class="linha" id="filtros-propostas" style="margin-bottom:16px">' +
         formField('f-cpf', 'CPF', '<input id="f-cpf" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00">') +
         formField('f-status', 'Status', '<select id="f-status">' + filterOptions('Todos', STATUS_LABEL) + '</select>') +
         formField('f-step', 'Etapa atual', '<select id="f-step">' + filterOptions('Todas', STEP_LABEL) + '</select>') +
@@ -3164,7 +3238,7 @@
         clearButton('limpar-propostas') +
         '</div>' +
         '<div id="stats-propostas"></div>' +
-        '<p class="hint">Contagem por status no período e etapa filtrados; status e CPF valem só para a lista.</p>' +
+        '<p class="hint">O total considera o período e a etapa. Os filtros de status e CPF afetam apenas a lista.</p>' +
         '<div id="lista-propostas"><p class="hint">Carregando…</p></div>' +
         '</div>'
 
@@ -3226,7 +3300,7 @@
         app.innerHTML =
           '<div class="card" id="dlq">' +
           '<h1>Falhas definitivas (DLQ)</h1>' +
-          '<p class="hint">Propostas em erro definitivo: retentativas esgotadas ou rejeição da Função. São alçada do backoffice — confira o histórico e trate com o colaborador. A matrícula já está livre: uma nova simulação abre outra proposta.</p>' +
+          '<p class="hint">Essas falhas incluem retentativas esgotadas e recusas da Função. O backoffice acompanha os casos: confira o histórico e oriente o colaborador. A matrícula fica livre, então uma nova simulação pelo CPF abre outra proposta.</p>' +
           proposalsTable(r.proposals, 'Nenhuma proposta na DLQ.') +
           (r.proposals.length ? pager(r.meta, 'dlq') : '') +
           '</div>'
@@ -3282,7 +3356,7 @@
         f.dlq = dlq.proposals
         const dlqTotal = String(dlq.meta.total)
         const section = (title, list, emptyText, hint) =>
-          '<h2 style="margin-top:18px">' + title + ' (' + list.length + ')</h2>' + (hint ? '<p class="hint">' + hint + '</p>' : '') + proposalsTable(list, emptyText)
+          '<h2 style="margin-top:16px">' + title + ' (' + list.length + ')</h2>' + (hint ? '<p class="hint">' + hint + '</p>' : '') + proposalsTable(list, emptyText)
         app.innerHTML =
           '<div class="card" id="filas">' +
           '<h1>Filas em background</h1>' +
@@ -3298,14 +3372,14 @@
           '<p class="hint">Amostra: as ' + f.total + ' propostas mais recentes. Por estado interno: ' +
           f.byInternalStatus.map(([st, n]) => esc(labelOf(INTERNAL_STATUS_LABEL, st)) + ' <code>' + esc(st) + '</code> ' + n).join(' · ') + '</p>' +
           section('Fila de retry (outbox)', f.retry, 'Nenhum reprocessamento agendado.',
-            'Falha que com certeza não chegou à Função (rede, token). O worker reprocessa sozinho no horário da coluna Retry — nada a fazer.') +
+            'A chamada não chegou à Função por uma falha de rede ou autenticação. O worker tenta de novo no horário indicado em Retry.') +
           section('Erro sem retry agendado', f.stalled, 'Nenhuma proposta parada em erro.',
             'ERROR_RETRYABLE sem evento no outbox (conciliação "não criada" ou falha não transitória da inclusão): ninguém reprocessa sozinho. O colaborador reconfirma ou cancela pela tela dele.') +
           section('Inclusão em curso ou desfecho desconhecido', f.submitting, 'Nenhuma inclusão em andamento.',
             'SUBMITTING: a chamada está no ar, ou deu timeout e a Função pode ter criado a proposta. Desfecho desconhecido nunca é reenviado às cegas: o serviço procura a proposta na Função a cada minuto e concilia sozinho.') +
           section('Aguardando cadastro do colaborador', f.awaitingData, 'Nenhuma proposta parada no cadastro.',
             'Cliente PF incompleto (RN07): depende do colaborador completar os dados e confirmar de novo.') +
-          '<h2 style="margin-top:18px">DLQ (' + dlqTotal + ')</h2>' +
+          '<h2 style="margin-top:16px">DLQ (' + dlqTotal + ')</h2>' +
           '<p class="hint">Lista completa na aba DLQ. Não há reprocessamento de DLQ pela API: a matrícula já está livre, e o colaborador refaz a simulação pelo CPF.</p>' +
           '</div>'
         bindHistory()
@@ -3357,7 +3431,7 @@
           { label: 'Celular', value: phone ? formatPhone((phone.areaCode || '') + (phone.number || '')) : '—' },
           {
             label: 'Endereço', wide: true, value: a
-              ? [[a.street, a.number, a.complement].filter(Boolean).join(', '), a.district, [a.city, a.state].filter(Boolean).join('/')].filter(Boolean).join(' — ') + (a.postalCode ? ' — CEP ' + formatPostalCode(a.postalCode) : '')
+              ? [[a.street, a.number, a.complement].filter(Boolean).join(', '), a.district, [a.city, a.state].filter(Boolean).join('/')].filter(Boolean).join(', ') + (a.postalCode ? ', CEP ' + formatPostalCode(a.postalCode) : '')
               : '—'
           },
         ]) : '') +
@@ -3390,12 +3464,12 @@
      * sobre proposta — quem conduz e o colaborador, e o desfecho desconhecido se resolve sozinho.
      */
     function supportNote(h) {
-      if (awaitsReconciliation(h)) return 'Desfecho desconhecido: o envio não teve resposta. O serviço procura a proposta na Função a cada minuto — achou, vira incluída; sem sinal dela em 30 minutos, volta ao colaborador para reenviar.'
-      if (h.internalStatus === 'FAILED_PERMANENT') return 'DLQ: não há reprocessamento. A matrícula já está livre — uma nova simulação pelo CPF abre outra proposta.'
+      if (awaitsReconciliation(h)) return 'Desfecho desconhecido: a Função não respondeu ao envio. O serviço procura a proposta a cada minuto. Se encontrá-la, atualiza o status. Se não encontrá-la em 30 minutos, a proposta volta ao colaborador para reenvio.'
+      if (h.internalStatus === 'FAILED_PERMANENT') return 'DLQ: não há reprocessamento. A matrícula já está livre, então uma nova simulação pelo CPF abre outra proposta.'
       if (h.internalStatus === 'ERROR_RETRYABLE') return (h.retries || []).some((r) => !r.processedAt && !r.deadAt)
         ? 'Retry agendado no outbox: o worker reprocessa sozinho.'
         : 'Falha sem retry agendado: o colaborador tenta de novo ou cancela pela tela dele.'
-      if (h.internalStatus === 'UNAVAILABLE') return 'Indisponível por dado de referência: confira se há lote de vínculos vigente (Developer › Lotes; a planilha chega pela caixa de entrada do bucket) ou se a filial está cadastrada (aba Configurações); a proposta volta a andar quando o colaborador refizer a simulação pelo CPF.'
+      if (h.internalStatus === 'UNAVAILABLE') return 'Indisponível por dado de referência. Confira se há lote vigente em Developer › Lotes e se a filial está cadastrada em Configurações. Depois do ajuste, peça ao colaborador que simule de novo.'
       if (h.internalStatus === 'SUBMITTING') return 'Inclusão em curso na Função.'
       return ''
     }
@@ -3443,7 +3517,7 @@
       })
       if (h.proposalNumber) {
         const finished = h.step === 'FINISHED'
-        const pipeline = h.pipeline ? esc(PIPELINE_STATUS_LABEL[h.pipeline.status] || h.pipeline.status) + (h.pipeline.activityDescription ? ' — ' + esc(h.pipeline.activityDescription) : '') : ''
+        const pipeline = h.pipeline ? esc(PIPELINE_STATUS_LABEL[h.pipeline.status] || h.pipeline.status) + (h.pipeline.activityDescription ? ': ' + esc(h.pipeline.activityDescription) : '') : ''
         rows.push(timelineExtra(finished ? 'concluida' : 'atual by-institution', 'Análise na Função', finished ? 'concluída' : 'Agora · com a Função', pipeline, 4))
         if (finished) rows.push(timelineExtra(FINISHED_STATE[h.status] || 'concluida', 'Resultado', STATUS_LABEL[h.status] || h.status, '', 4))
       }
@@ -3466,7 +3540,7 @@
      */
     function antifraudBox(h) {
       const a = h.antifraud
-      const head = '<h2 class="secao">Antifraude — Certta</h2>'
+      const head = '<h2 class="secao">Antifraude: Certta</h2>'
       if (!a) return head + '<p class="hint" id="antifraude">Sem triagem: a triagem está desligada ou a proposta ainda não foi incluída na Função.</p>'
       const table = (headers, rows) => '<div class="rolagem"><table class="tbl"><thead><tr>' + headers.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
       const detail = (e) => [
@@ -3542,7 +3616,7 @@
           '<h3>Envios à Função</h3>' +
           table(['Status', 'Proposta Função', 'Motivo (como a Função devolveu)', 'Em'], (h.submissions || []).map((s) =>
             '<tr data-envio-status="' + esc(s.status) + '"><td>' + esc(stepStatusLabel(s.status)) + '</td><td>' + esc(s.proposalNumber || '—') + '</td><td>' + reasonLabel(s.errorCode) + '</td><td>' + esc(formatDateTime(s.createdAt)) + '</td></tr>')) +
-          '<div style="height:14px"></div>' +
+          '<div style="height:16px"></div>' +
           '<div class="linha"><button class="acao sec" id="btn-voltar-lista">Voltar</button>' +
           (c ? '<button class="acao" id="btn-ficha">Ver ficha do colaborador</button>' : '') + '</div>' +
           '</div>'
@@ -3571,7 +3645,7 @@
       const input = (id, label, extra) => formField(id, label, '<input id="' + id + '" spellcheck="false"' + (extra || '') + '>')
       const form = (id, fields) => '<form id="' + id + '" class="linha" style="margin-bottom:10px">' + fields + '<button class="acao" style="flex:0 0 120px">Buscar</button></form>'
       app.innerHTML =
-        '<div class="card"><h1>Função — cadastro</h1><p class="hint">Consultas de leitura no ambiente da Função (HML). Sem filtro, lista a primeira página.</p>' +
+        '<div class="card"><h1>Função: cadastro</h1><p class="hint">Consultas de leitura na Função (HML). Sem filtro, a busca lista a primeira página.</p>' +
         alertBox('erro-funcao') + '</div>' +
         '<div class="card"><h2>Empregadores (Origem4)</h2>' +
         form('form-emp', input('fe-code', 'Código') + input('fe-desc', 'Descrição') + input('fe-cnpj', 'CNPJ') +
@@ -3583,7 +3657,7 @@
         '<div class="card"><h2>Funcionários</h2><p class="hint">Por CPF ou matrícula; sem nenhum dos dois, lista o empregador.</p>' +
         form('form-fun', input('fu-cpf', 'CPF') + input('fu-mat', 'Matrícula') + input('fu-emp', 'Origem4 (empregador)') + input('fu-fil', 'Origem5 (filial)')) +
         '<div id="res-fun"></div></div>' +
-        '<div class="card"><h2>Esteira — aprovar proposta</h2><p class="hint">Aciona a esteira da Função com <strong>Aprovar</strong> para a proposta já incluída (efeito real no ambiente da Função; recusado em produção). Só a esteira em <em>Integrada</em> conta como contrato ativo.</p>' +
+        '<div class="card"><h2>Esteira: aprovar proposta</h2><p class="hint">A ação <strong>Aprovar</strong> altera a proposta já incluída na esteira da Função e não está disponível em produção. Só propostas com situação <em>Integrada</em> contam como contrato ativo.</p>' +
         '<form id="form-aprovar" class="linha" style="margin-bottom:10px">' + input('ap-id', 'ID da proposta') + '<button class="acao" style="flex:0 0 120px">Aprovar</button></form>' +
         '<div id="res-aprovar"></div></div>'
 
@@ -3639,7 +3713,7 @@
     function antifraudScreen(isCurrent) {
       const input = (id, label, extra) => formField(id, label, '<input id="' + id + '" spellcheck="false"' + (extra || '') + '>')
       app.innerHTML =
-        '<div class="card"><h1>Antifraude — Certta</h1><p class="hint">Background check do template configurado (<code>CERTTA_TEMPLATE_ID</code>), fora de proposta. <strong>Cada consulta cria uma transação cobrada</strong>; o <code>idInterno</code> vai como <code>dev-…</code>. Recusada em produção.</p>' +
+        '<div class="card"><h1>Antifraude: Certta</h1><p class="hint">Consulta avulsa pelo template configurado (<code>CERTTA_TEMPLATE_ID</code>), fora de uma proposta. <strong>Cada consulta cria uma transação cobrada.</strong> O <code>idInterno</code> recebe o prefixo <code>dev-</code>. Recusada em produção.</p>' +
         alertBox('erro-antifraude') + '</div>' +
         '<div class="card"><h2>Consultar CPF</h2>' +
         '<form id="form-af" class="linha" style="margin-bottom:10px">' +
@@ -3725,7 +3799,7 @@
       app.innerHTML =
         '<div class="card">' +
         '<h1>Planilha de vínculos</h1>' +
-        '<p class="hint">O empregador deposita a planilha (.xlsx com as abas <strong>Ativos</strong> e <strong>DEMITIDOS</strong>, ou .csv único separado pela coluna SITUACAO) na caixa de entrada do bucket; o serviço a busca sozinho a cada ciclo e cria um lote. Antes de ler, o arquivo passa por uma verificação de integridade; depois de gravar, o serviço confere que o banco tem as linhas aceitas. O lote fica <strong>Processando</strong> enquanto é lido e, ao terminar, vira <strong>Processado</strong> — vigente, no lugar do anterior — ou <strong>Recusado</strong>, com o motivo, quando o arquivo está errado. Falha inesperada deixa o lote <strong>Tentando de novo</strong> e o próximo ciclo repete, até 3 tentativas; esgotadas, vira <strong>Falhou</strong> e o arquivo fica guardado para a equipe de T.I. Linhas recusadas ficam no lote para consulta. Canais e filiais ficam na aba Configurações.</p>' +
+        '<p class="hint">O empregador deposita no bucket um arquivo .xlsx com as abas <strong>Ativos</strong> e <strong>DEMITIDOS</strong>, ou um .csv separado pela coluna SITUACAO. Se válido, o serviço grava as linhas aceitas e publica o lote. Um lote processado substitui o anterior; um arquivo inválido é recusado com o motivo. Falhas inesperadas têm até 3 tentativas. Depois delas, o arquivo fica guardado para a equipe de T.I. Consulte as linhas recusadas no lote. Canais e filiais estão em Configurações.</p>' +
         alertBox('erro-lote') +
         '<button class="acao" id="btn-atualizar">Atualizar lotes</button>' +
         '</div>' +
@@ -3806,7 +3880,7 @@
         const withoutCurrent = Object.keys(currentBatches).filter((k) => !currentBatches[k])
         target.innerHTML =
           '<div class="grid" id="vigentes">' + Object.entries(currentBatches).map(([k, b]) =>
-            '<div class="box' + (b ? '' : ' destaque') + '" data-vigente="' + k + '"><div class="rot">' + esc(DATASET_LABEL[k]) + ' — vigente</div>' +
+            '<div class="box' + (b ? '' : ' destaque') + '" data-vigente="' + k + '"><div class="rot">' + esc(DATASET_LABEL[k]) + ' (vigente)</div>' +
             '<div class="val">' + (b ? esc(b.filename) + '<span class="sub">' + esc(b.rowCount + b.rejectedCount) + ' linhas lidas · ' + esc(b.rowCount) + ' aceitas · ' + esc(formatDateTime(b.publishedAt)) + '</span>' : '<span class="fail">Sem lote vigente</span>') + '</div></div>').join('') +
           '</div>' +
           (withoutCurrent.length ? '<div class="aviso erro">Sem lote vigente em ' + esc(withoutCurrent.map((k) => DATASET_LABEL[k]).join(', ') + '. Propostas que dependem dessa base ficam indisponíveis (erro para o colaborador) até a publicação.') + '</div>' : '') +
@@ -3841,8 +3915,8 @@
 
     // Empregadores (Origem 4) e filiais (Origem 5) em uma tela so, somente leitura: vem do catalogo da
     // Funcao, a fonte da verdade, que a API guarda em memoria e renova a cada hora. Nada disso fica no banco.
-    const readOnlyTable = (headers, rows) =>
-      '<div class="rolagem"><table class="tbl"><thead><tr>' + headers.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>' +
+    const readOnlyTable = (caption, headers, rows) =>
+      '<div class="rolagem" tabindex="0" role="region" aria-label="' + esc(caption) + '"><table class="tbl"><caption class="sr-only">' + esc(caption) + '</caption><thead><tr>' + headers.map((c) => '<th scope="col">' + esc(c) + '</th>').join('') + '</tr></thead><tbody>' +
       rows.map((cells) => '<tr>' + cells.map((c) => '<td>' + esc(c || '—') + '</td>').join('') + '</tr>').join('') +
       '</tbody></table></div>'
 
@@ -3859,7 +3933,7 @@
         '<div class="card">' +
         '<h1>Contratos</h1>' +
         '<p class="hint">Contratos em aberto na Função, consultados na hora pelo CPF e pelas matrículas do lote vigente. A Função não lista contratos sem um CPF.</p>' +
-        '<form id="form-contratos" style="margin-bottom:14px"><div class="linha">' +
+        '<form id="form-contratos" style="margin-bottom:16px"><div class="linha">' +
         '<input id="cpf-contratos" placeholder="CPF" inputmode="numeric" spellcheck="false" value="' + esc(last ? maskCpf(last.cpf) : '') + '">' +
         '<button class="acao" style="flex:0 0 160px">Buscar</button>' +
         '</div></form>' +
@@ -3905,10 +3979,10 @@
         alertBox('erro-config') +
         '<p class="hint" id="config-atualizado">Origens lidas da Função.</p>' +
         '<h2>Empregadores (Origem 4)</h2>' +
-        '<p class="hint">Empregador pelo qual a venda entra na Função — o código vai como Origem 4 em toda simulação e proposta. Inativo não libera nenhuma filial.</p>' +
+        '<p class="hint">A Origem 4 identifica o empregador da venda. Esse código segue nas simulações e propostas. A tabela mostra a Origem 3 associada no catálogo da Função. Filiais de uma Origem 4 inativa não são liberadas.</p>' +
         '<div id="config-canais" class="hint">Carregando…</div>' +
-        '<h2 style="margin-top:18px">Filiais (Origem 5)</h2>' +
-        '<p class="hint">Unidade onde o colaborador trabalha, achada pelo CNPJ do vínculo — o código vai como Origem 5, e o empregador dela define a Origem 4. CNPJ repetido em mais de uma filial não é resolvido.</p>' +
+        '<h2 style="margin-top:16px">Filiais (Origem 5)</h2>' +
+        '<p class="hint">A Origem 5 identifica a filial do vínculo. A API localiza a filial pelo CNPJ e usa a Origem 4 associada. Se o CNPJ estiver em mais de uma filial, a API não escolhe uma.</p>' +
         '<div id="config-filiais" class="hint">Carregando…</div>' +
         '</div>'
 
@@ -3917,11 +3991,17 @@
         document.getElementById('config-atualizado').textContent =
           'Catálogo da Função, lido em ' + formatDateTime(refreshedAt) + ' e renovado a cada hora.'
         document.getElementById('config-canais').innerHTML = channels.length
-          ? readOnlyTable(['Código na Função', 'Descrição', 'CNPJ', 'Situação'],
-            channels.map((c) => [c.funcaoCode, c.name, c.cnpj, c.active ? 'Ativo' : 'Inativo']))
+          ? readOnlyTable('Empregadores e Origens 3 da Função', ['Código na Função', 'Descrição', 'Origem 3 associada', 'CNPJ', 'Situação'],
+            channels.map((c) => [
+              c.funcaoCode,
+              c.name,
+              c.origin3 && [c.origin3.funcaoCode, c.origin3.name].filter(Boolean).join(' · '),
+              c.cnpj,
+              c.active ? 'Ativo' : 'Inativo',
+            ]))
           : 'Nenhum empregador na Função.'
         document.getElementById('config-filiais').innerHTML = branches.length
-          ? readOnlyTable(['Código na Função', 'Descrição', 'CNPJ da filial', 'Empregador (Origem 4)'],
+          ? readOnlyTable('Filiais e empregadores da Função', ['Código na Função', 'Descrição', 'CNPJ da filial', 'Empregador (Origem 4)'],
             branches.map((f) => [f.funcaoCode, f.name, f.cnpj, f.channel && [f.channel.funcaoCode, f.channel.name].filter(Boolean).join(' · ')]))
           : 'Nenhuma filial na Função.'
       }).catch((err) => { if (isCurrent()) showError('erro-config', err.message) })
@@ -4008,7 +4088,7 @@
         '<div class="card">' +
         '<h1>Funcionários</h1>' +
         '<p class="hint">Vínculos do lote vigente: é a base que a elegibilidade consulta. Ativos e desligados vêm das abas da planilha que o empregador deposita no bucket (acompanhe em <strong>Developer › Lotes</strong>).</p>' +
-        '<form id="form-funcionarios" style="margin-bottom:14px">' +
+        '<form id="form-funcionarios" style="margin-bottom:16px">' +
         '<div class="linha" style="margin-bottom:10px">' +
         '<input id="busca-funcionarios" placeholder="Nome, CPF ou CNPJ" spellcheck="false" value="' + esc(f.search) + '">' +
         '<button class="acao" style="flex:0 0 160px">Buscar</button>' +
@@ -4116,13 +4196,13 @@
             { label: 'Demissão', value: formatDate(f.terminationDate) },
             { label: 'Cargo', value: orDash(f.jobTitle) },
           ]) +
-          '<h2 style="margin-top:18px">Contratos ativos <span id="contratos-func-qtd"></span></h2>' +
+          '<h2 style="margin-top:16px">Contratos ativos <span id="contratos-func-qtd"></span></h2>' +
           alertBox('erro-contratos-func') +
           '<div id="contratos-func"><p class="hint">Consultando na Função…</p></div>' +
-          '<h2 style="margin-top:18px">Propostas</h2>' +
+          '<h2 style="margin-top:16px">Propostas</h2>' +
           proposalsTable(f.proposals, 'Nenhuma proposta deste CPF.') +
-          '<h2 style="margin-top:18px">Cadastro na Função</h2>' +
-          '<p class="hint">Não decide elegibilidade — vale o lote vigente.</p>' +
+          '<h2 style="margin-top:16px">Cadastro na Função</h2>' +
+          '<p class="hint">O Cadastro na Função não decide elegibilidade. A análise considera o lote vigente.</p>' +
           alertBox('erro-funcao-func') +
           '<div>' +
           '<div><h3>Cliente PF</h3><p class="hint">Criado pela inclusão da proposta: aparece depois do primeiro envio.</p><div id="funcao-cliente"></div></div>' +
@@ -4196,12 +4276,12 @@
         buildSupplementPayload({ otherIncome: '1.250,50' }).otherIncome, 1250.5)
       check('renda sem milhar também', parseBrNumber('1250,50'), 1250.5)
       check('renda já em formato cru passa direto', parseBrNumber('1250.5'), 1250.5)
-      check('pep só entra quando escolhido — "nao" é false',
+      check('pep só entra quando escolhido, "nao" é false',
         buildSupplementPayload({ pep: 'nao' }), { pep: false })
       check('pep "sim" é true', buildSupplementPayload({ pep: 'sim' }), { pep: true })
       check('message em lista vira frase', errorMessage({ message: ['a', 'b'] }, 400), 'a b')
       check('esteira ausente não desenha nada', pipelineBox(null), '')
-      check('esteira traduz a situação', /Liberada — Tela de confirmação/.test(pipelineBox({ status: 'RELEASED', activityDescription: 'Tela de confirmação', reasons: [] })), true)
+      check('esteira traduz a situação', /Liberada: Tela de confirmação/.test(pipelineBox({ status: 'RELEASED', activityDescription: 'Tela de confirmação', reasons: [] })), true)
       check('problem+json usa o title', errorMessage({ title: 'Proposta não encontrada.', status: 404 }, 404), 'Proposta não encontrada.')
       check('erro do Zod mostra o motivo, não "Validation failed"',
         errorMessage({ statusCode: 400, message: 'Validation failed', errors: [{ message: 'Informe exatamente um dos dois.' }] }, 400),
@@ -4210,10 +4290,10 @@
       check('data ISO vira pt-BR', formatDate('2026-03-09T00:00:00.000Z'), '09/03/2026')
       check('convênio explica a faixa de tempo de casa',
         agreementText({ code: '003030', tenureMinYears: 1, tenureMaxYears: 3 }, 2),
-        'Convênio 003030 — de 1 a 3 anos de casa (você tem 2 anos)')
+        'Convênio 003030, de 1 a 3 anos de casa (você tem 2 anos)')
       check('faixa aberta vira "ou mais"',
         agreementText({ code: '003034', tenureMinYears: 7, tenureMaxYears: null }, 9),
-        'Convênio 003034 — 7 anos de casa ou mais (você tem 9 anos)')
+        'Convênio 003034, 7 anos de casa ou mais (você tem 9 anos)')
       check('status tem rótulo', [STATUS_LABEL.NOT_SUBMITTED, JOURNEY_STEP_LABEL.ANALYSIS], ['Não enviada', 'Análise da instituição'])
       check('recusada sem chegar à Função usa a frase neutra (RF-ELG-002/003)',
         [statusMessage({ status: 'REJECTED' }), statusMessage({ status: 'REJECTED', proposalNumber: '1' })],
@@ -4261,7 +4341,7 @@
         awaitsReconciliation(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: null }])), false)
       check('DLQ orienta nova simulação, não reprocesso', /nova simulação/.test(supportNote(historyView('FAILED_PERMANENT'))), true)
       check('retry agendado: o worker reprocessa sozinho', /sozinho/.test(supportNote(historyView('ERROR_RETRYABLE', [], [{ processedAt: null, deadAt: null }]))), true)
-      check('desfecho desconhecido: o serviço resolve sozinho', /Função a cada minuto/.test(supportNote(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }]))), true)
+      check('desfecho desconhecido: o serviço resolve sozinho', /a cada minuto/.test(supportNote(historyView('SUBMITTING', [{ step: 'INCLUSION', status: 'PENDING', reasonCode: 'PROPOSAL_OUTCOME_UNKNOWN' }]))), true)
 
       const currentBatches = currentByDataset([
         { dataset: 'EMPLOYMENT', status: 'SUPERSEDED', publishedAt: '2026-09-30' },
@@ -4290,7 +4370,14 @@
       check('crédito máximo é a oferta de maior valor da Função', bestOffer([{ requestedAmount: 900 }, { requestedAmount: 1500 }, { requestedAmount: 1200 }]), { requestedAmount: 1500 })
       check('sem oferta não há crédito máximo', [bestOffer([]), bestOffer(undefined)], [null, null])
       check('ajuste: oferta do requote não se diz crédito máximo',
-        [offerHeadline({ requestedInstallment: null }), offerHeadline({ requestedInstallment: 600 })], ['Valor escolhido por você', 'Crédito máximo disponível'])
+        [offerHeadline({ requestedInstallment: null }), offerHeadline({ requestedInstallment: 600 })], ['Valor do empréstimo', 'Crédito máximo disponível'])
+      check('ajuste: destaque é o prazo marcado; sem marca (ou de outra cotação), a de maior valor',
+        [chosenOffer([{ offerId: 'a', requestedAmount: 900 }, { offerId: 'b', requestedAmount: 1500 }], 'a').offerId,
+        chosenOffer([{ offerId: 'a', requestedAmount: 900 }, { offerId: 'b', requestedAmount: 1500 }], 'x').offerId, chosenOffer([], 'a')],
+        ['a', 'b', null])
+      check('ajuste: valor do menor mínimo ao maior máximo dos prazos',
+        requoteRange({ minAmount: 500, options: [{ minAmount: 120, availableAmount: 691.21 }, { minAmount: 808, availableAmount: 2210.56 }] }),
+        { min: 500, max: 2210.56 })
       check('ajuste: valor pt-BR na faixa vai em centavos, limites inclusos',
         [checkRequoteAmount('1.250,50', 500, 2000), checkRequoteAmount('500', 500, 2000), checkRequoteAmount('2000.004', 500, 2000)],
         [{ amount: 1250.5 }, { amount: 500 }, { amount: 2000 }])
@@ -4299,7 +4386,7 @@
       check('ajuste: mínimo do prazo vem da API e nunca fica abaixo de R$ 500',
         [termRange({ minAmount: 808, availableAmount: 3600 }, 500), termRange({ minAmount: 120, availableAmount: 3600 }, 500), termRange({ availableAmount: 900 }, 500)],
         [{ min: 808, max: 3600 }, { min: 500, max: 3600 }, { min: 500, max: 900 }])
-      check('ajuste: trocar de prazo mantém o valor na faixa; vazio vira o máximo',
+      check('ajuste: valor fora da faixa vem para a ponta; vazio vira o máximo',
         [clampAmount(2000, 808, 3600), clampAmount(5000, 808, 3600), clampAmount(600, 808, 3600), clampAmount(NaN, 808, 3600)],
         [2000, 3600, 808, 3600])
       check('erro do Zod leva o nome do campo',
@@ -4334,9 +4421,9 @@
     // troca pelo hash, sem reload: a jornada do colaborador continua no sessionStorage e a aba de cada
     // portal em memoria, entao ir e voltar nao perde o ponto em que cada um estava. O hash vence o caminho.
     const MODES = {
-      colaborador: { title: 'Consignado Privado — proposta', brand: 'Consignado Privado', sub: 'Crédito com desconto em folha' },
-      admin: { title: 'Backoffice — Consignado', brand: 'Backoffice', sub: 'Operação do Consignado Privado' },
-      dev: { title: 'Developer — Consignado', brand: 'Developer', sub: 'Filas, DLQ e cargas em segundo plano' },
+      colaborador: { title: 'Consignado Privado: proposta', brand: 'Consignado Privado', sub: 'Crédito com desconto em folha' },
+      admin: { title: 'Backoffice: Consignado', brand: 'Backoffice', sub: 'Operação do Consignado Privado' },
+      dev: { title: 'Developer: Consignado', brand: 'Developer', sub: 'Filas, DLQ e cargas em segundo plano' },
     }
     function currentMode() {
       const fromHash = location.hash.slice(1)
