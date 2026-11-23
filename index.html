@@ -1555,7 +1555,8 @@
           title="Conexão com o backend (app e backoffice)">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <path
+              d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
@@ -1594,12 +1595,18 @@
         rotas. No app vale o CPF da conta do token, não o digitado. Base vazia: direto no ms.loans. O Developer fala
         sempre direto com o ms.loans.</p>
       <div class="grid form">
-        <div><label for="cfg-appBase">Base do app</label><input id="cfg-appBase" spellcheck="false" placeholder="http://localhost:4545"></div>
-        <div><label for="cfg-appToken">Token do cliente</label><input id="cfg-appToken" spellcheck="false" placeholder="JWT, sem o Bearer"></div>
-        <div><label for="cfg-boBase">Base do backoffice</label><input id="cfg-boBase" spellcheck="false" placeholder="http://localhost:4546"></div>
-        <div><label for="cfg-boToken">Token do operador</label><input id="cfg-boToken" spellcheck="false" placeholder="JWT, sem o Bearer"></div>
-        <div><label for="cfg-boTenant">Header tenantid</label><input id="cfg-boTenant" spellcheck="false" placeholder="tenant do backoffice"></div>
-        <div><label for="cfg-boDevice">Header device-id</label><input id="cfg-boDevice" spellcheck="false" placeholder="device com TOTP validado"></div>
+        <div><label for="cfg-appBase">Base do app</label><input id="cfg-appBase" spellcheck="false"
+            placeholder="http://localhost:4545"></div>
+        <div><label for="cfg-appToken">Token do cliente</label><input id="cfg-appToken" spellcheck="false"
+            placeholder="JWT, sem o Bearer"></div>
+        <div><label for="cfg-boBase">Base do backoffice</label><input id="cfg-boBase" spellcheck="false"
+            placeholder="http://localhost:4546"></div>
+        <div><label for="cfg-boToken">Token do operador</label><input id="cfg-boToken" spellcheck="false"
+            placeholder="JWT, sem o Bearer"></div>
+        <div><label for="cfg-boTenant">Header tenantid</label><input id="cfg-boTenant" spellcheck="false"
+            placeholder="tenant do backoffice"></div>
+        <div><label for="cfg-boDevice">Header device-id</label><input id="cfg-boDevice" spellcheck="false"
+            placeholder="device com TOTP validado"></div>
       </div>
       <div style="height:16px"></div>
       <button class="acao">Fechar</button>
@@ -2097,7 +2104,6 @@
       FUNCAO_CALL_FAILED: 'Falha na chamada à Função',
       FUNCAO_REJECTED: 'Recusado pela Função',
       NOT_INCLUDED: 'Proposta ainda não incluída na Função',
-      DEV_ONLY_ACTION: 'Ação só de desenvolvimento',
       VIACEP_FAILED: 'Falha no ViaCEP',
       EMPLOYEE_NOT_FOUND: 'Funcionário não encontrado',
     }
