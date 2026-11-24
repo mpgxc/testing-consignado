@@ -2026,6 +2026,7 @@
       NOT_CANCELLABLE: 'Estado não permite cancelar',
       CANCELLED_BY_REQUEST: 'Cancelada a pedido',
       SNAPSHOT_MISSING: 'Vínculo congelado ausente',
+      EMPLOYMENT_PENDING: 'Vínculo com pendência na planilha',
       NOT_ACTIVE: 'Vínculo não ativo',
       ON_VACATION: 'Vínculo de férias',
       AGE_OUT_OF_RANGE: 'Fora da faixa de 18 a 80 anos',
@@ -3009,7 +3010,7 @@
      * As duas visoes sao o mesmo portal com abas diferentes; cada uma lembra a sua aba.
      */
     const PORTAL_TABS = {
-      admin: [['propostas', 'Propostas'], ['funcionarios', 'Funcionários'], ['contratos', 'Contratos'], ['configuracoes', 'Configurações']],
+      admin: [['propostas', 'Propostas'], ['funcionarios', 'Funcionários'], ['pendencias', 'Pendências'], ['contratos', 'Contratos'], ['configuracoes', 'Configurações']],
       dev: [['filas', 'Filas'], ['dlq', 'DLQ'], ['lotes', 'Lotes'], ['funcao', 'Função'], ['antifraude', 'Antifraude']],
     }
     const portalTab = { admin: 'propostas', dev: 'filas' }
@@ -3026,11 +3027,12 @@
       clearTimeout(queuesTimer)
       const tab = portalTab[portalMode]
       document.getElementById('stepper').innerHTML = PORTAL_TABS[portalMode]
-        .map(([id, label]) => '<button class="aba' + (tab === id ? ' ativa' : '') + '" data-aba="' + id + '">' + label + (id === 'dlq' ? '<span class="badge oculto" id="dlq-contagem"></span>' : '') + '</button>').join('')
+        .map(([id, label]) => '<button class="aba' + (tab === id ? ' ativa' : '') + '" data-aba="' + id + '">' + label + (id === 'dlq' || id === 'pendencias' ? '<span class="badge oculto" id="' + id + '-contagem"></span>' : '') + '</button>').join('')
       for (const b of document.querySelectorAll('[data-aba]')) {
         b.onclick = () => { portalTab[portalMode] = b.dataset.aba; renderAdmin() }
       }
       if (portalMode === 'dev') notifyDlq()
+      if (portalMode === 'admin') notifyPending()
 
       const isCurrent = newScreen()
       if (tab === 'propostas') proposalsScreen(isCurrent)
@@ -3040,6 +3042,7 @@
       else if (tab === 'funcao') funcaoScreen(isCurrent)
       else if (tab === 'antifraude') antifraudScreen(isCurrent)
       else if (tab === 'funcionarios') employeesScreen(isCurrent)
+      else if (tab === 'pendencias') pendingScreen(isCurrent)
       else if (tab === 'contratos') adminContractsScreen(isCurrent)
       else settingsScreen(isCurrent)
     }
@@ -3051,6 +3054,15 @@
     function notifyDlq() {
       api('GET', '/admin/proposals?dlq=true&pageSize=1').then((r) => {
         const el = document.getElementById('dlq-contagem')
+        if (!el || r.meta.total === 0) return
+        el.textContent = String(r.meta.total)
+        el.classList.remove('oculto')
+      }).catch(() => { /* a aba continua funcionando sem a contagem */ })
+    }
+
+    function notifyPending() {
+      api('GET', '/admin/employees/pending?pageSize=1').then((r) => {
+        const el = document.getElementById('pendencias-contagem')
         if (!el || r.meta.total === 0) return
         el.textContent = String(r.meta.total)
         el.classList.remove('oculto')
@@ -4002,11 +4014,17 @@
           (last.rejectedCount > 0 ? ' · <strong>' + esc(last.rejectedCount) + ' linha(s) recusada(s)</strong>' : '') +
           (last.errorMessage ? '<br><strong>Motivo:</strong> ' + esc(last.errorMessage) : '') +
           '<br>' + esc(hint) +
+          (last.status === 'PUBLISHED' && last.rejectedCount > 0
+            ? '<br>O CPF de uma linha recusada fica inelegível até a planilha corrigida ser publicada. <button class="link" id="ir-pendencias">Ver pendências</button>'
+            : '') +
           (current && current !== last ? '<br>Base em uso: ' + esc(current.filename) + ', publicada em ' + esc(formatDateTime(current.publishedAt)) + '.' : '') +
           (current ? '' : '<br><strong>Sem base vigente:</strong> ninguém passa na elegibilidade até uma planilha ser publicada.') +
           '<div id="ultima-ingestao-recusas"></div>' +
           '</div>'
-        if (last.rejectedCount > 0) paintLastRejections(last.id, isCurrent)
+        const goPending = document.getElementById('ir-pendencias')
+        if (goPending) goPending.onclick = () => { portalTab.admin = 'pendencias'; renderAdmin() }
+        // Publicada: as recusadas estão na aba Pendências. Recusada inteira: só o lote tem as linhas.
+        if (last.rejectedCount > 0 && last.status !== 'PUBLISHED') paintLastRejections(last.id, isCurrent)
       }).catch(() => { /* a aba segue funcionando sem o aviso */ })
     }
 
@@ -4091,6 +4109,39 @@
         }
         bindPager('func', r.meta.page, (page) => go({ ...f, page }))
       }).catch((err) => { if (isCurrent()) showError('erro-funcionarios', err.message) })
+    }
+
+    const PENDING_PER_PAGE = 50
+    let pendingPage = 1
+
+    /** Linhas recusadas da planilha vigente (`GET /admin/employees/pending`), na ordem do arquivo. */
+    function pendingScreen(isCurrent) {
+      app.innerHTML =
+        '<div class="card">' +
+        '<h1>Pendências</h1>' +
+        '<p class="hint">Linhas da planilha vigente que não passaram na validação: não viraram vínculo, e o CPF delas fica inelegível, mesmo com outro vínculo válido, até o empregador corrigir a linha e depositar a planilha de novo.</p>' +
+        alertBox('erro-pendencias') +
+        '<div id="lista-pendencias"><p class="hint">Carregando…</p></div>' +
+        '</div>'
+
+      api('GET', '/admin/employees/pending?' + queryFiltros({ page: pendingPage, pageSize: PENDING_PER_PAGE })).then((r) => {
+        if (!isCurrent()) return
+        document.getElementById('lista-pendencias').innerHTML = r.data.length
+          ? '<div class="rolagem"><table class="tbl"><thead><tr>' +
+          '<th>Linha</th><th>Nome</th><th>Matrícula</th><th>CNPJ</th><th>O que corrigir</th>' +
+          '</tr></thead><tbody>' +
+          r.data.map((p) => '<tr>' +
+            '<td>' + (p.sheet ? esc(p.sheet) + ' · ' : '') + esc(p.line) + '</td>' +
+            '<td>' + esc(orDash(p.name)) + '<span class="sub">' + esc(p.cpf || 'sem CPF') + '</span></td>' +
+            '<td>' + esc(orDash(p.employeeNumber)) + '</td>' +
+            '<td>' + esc(orDash(p.cnpj)) + '</td>' +
+            '<td style="white-space:normal;min-width:320px">' + p.issues.map((i) => '<div><strong>' + esc(i.field) + '</strong>: ' + esc(i.reason) + '</div>').join('') + '</td>' +
+            '</tr>').join('') +
+          '</tbody></table></div>' +
+          pager(r.meta, 'pend')
+          : '<p class="hint">Nenhuma pendência na planilha vigente.</p>'
+        bindPager('pend', r.meta.page, (page) => { pendingPage = page; pendingScreen(newScreen()) })
+      }).catch((err) => { if (isCurrent()) showError('erro-pendencias', err.message) })
     }
 
     const orDash = (v) => (v == null || v === '' ? '—' : String(v))
