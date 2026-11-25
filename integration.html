@@ -2730,6 +2730,33 @@
     const textInput = (name, value, extra) => '<input id="' + name + '" name="' + name + '" value="' + esc(value || '') + '"' +
       (FIELD_MAX_LENGTH[name] ? ' maxlength="' + FIELD_MAX_LENGTH[name] + '"' : '') + (extra || '') + '>'
 
+    function selectInput(name, value, options) {
+      return '<select id="' + name + '" name="' + name + '"><option value="">Selecione</option>' +
+        options.map(([v, r]) => '<option value="' + esc(v) + '"' + (String(value ?? '') === v ? ' selected' : '') + '>' + esc(r) + '</option>').join('') +
+        '</select>'
+    }
+
+    const upper = ' style="text-transform:uppercase"'
+    const pepValue = (f) => (typeof f.pep === 'boolean' ? (f.pep ? 'sim' : 'nao') : '')
+
+    /** Input de cada campo que pode vir em `missingFields`; o que nao estiver aqui vira texto livre. */
+    const PENDING_INPUT = {
+      sex: (f) => selectInput('sex', f.sex, Object.entries(SEX_LABEL)),
+      nationality: (f) => selectInput('nationality', f.nationality, Object.entries(NATIONALITY_LABEL)),
+      maritalStatus: (f) => selectInput('maritalStatus', f.maritalStatus, Object.entries(MARITAL_STATUS_LABEL)),
+      pep: (f) => selectInput('pep', pepValue(f), [['nao', 'Não'], ['sim', 'Sim']]),
+      documentType: (f) => selectInput('documentType', f.documentType, ['RG', 'CNH', 'CIN', 'RNE', 'CTPS', 'CR'].map((t) => [t, t])),
+      documentIssueDate: (f) => textInput('documentIssueDate', f.documentIssueDate, ' type="date"'),
+      documentState: (f) => textInput('documentState', f.documentState, upper),
+      state: (f) => textInput('state', f.state, upper),
+      correctedBankCode: () => selectInput('correctedBankCode', '530', [['530', '530 · b.Uni']]),
+      correctedPostalCode: (f) => textInput('correctedPostalCode', f.correctedPostalCode, ' inputmode="numeric"'),
+      correctedPhone: (f) => textInput('correctedPhone', f.correctedPhone, ' inputmode="numeric"'),
+    }
+
+    const pendingField = (name, f, label) =>
+      formField(name, label || FIELD_LABEL[name] || name, (PENDING_INPUT[name] || ((v) => textInput(name, v[name])))(f), true)
+
     const addressText = (k) => [k.street, k.streetNumber].filter(Boolean).join(', ') + (k.postalCode ? ', CEP ' + formatPostalCode(k.postalCode) : '')
     const bankText = (k) => [k.bankCode && 'Banco ' + k.bankCode, k.bankBranch && 'Agência ' + k.bankBranch, k.bankAccount && 'Conta ' + k.bankAccount].filter(Boolean).join(' · ')
 
@@ -2743,65 +2770,79 @@
 
     /**
      * O PATCH leva o `supplement` como a API devolveu (ja complementado pelo backend); o `pep` troca de forma
-     * e os digitos de agencia e conta nao vao (a tela nao os pede), nem o `otherIncome`, que e o unico campo digitavel.
+     * e os digitos de agencia e conta so vao se pendentes (digitados).
      */
     const DOCUMENT_FIELDS = ['documentType', 'documentNumber', 'documentState', 'documentIssuer', 'documentIssueDate']
 
-    // O documento vai sempre o escolhido entre os da conta (o backend recusa qualquer outro); sem nenhum, nao vai documento.
-    const supplementValues = (f, otherIncome, doc) => ({
+    // O documento vai o escolhido entre os da conta; o digitado nos pendentes vem depois e prevalece.
+    const supplementValues = (f, otherIncome, doc, typed) => ({
       ...f,
       ...Object.fromEntries(DOCUMENT_FIELDS.map((field) => [field, (doc && doc[field]) || ''])),
-      pep: typeof f.pep === 'boolean' ? (f.pep ? 'sim' : 'nao') : '',
+      pep: pepValue(f),
       accountCheckDigit: '',
       branchCheckDigit: '',
       otherIncome,
+      ...typed,
     })
 
-    // Tela somente leitura, salvo a renda adicional (opcional). O backend ja devolve o `supplement` completado com
-    // os dados da conta logada; o que ainda faltar so se resolve la (RH, cadastro do app), nao na tela.
+    // Somente leitura, salvo a renda adicional e o que a API ainda devolve em `missingFields` depois de o backend
+    // completar o `supplement` com a conta logada (o estado civil sempre: nenhuma fonte o tem).
     function paintCustomerData(view, isCurrent) {
       const k = view.known
       const f = view.supplement || {}
       const blank = (v) => v === undefined || v === null || v === ''
       const val = (v) => (blank(v) ? 'Não informado' : v)
-      const pending = view.missingFields.filter((c) => blank(f[c]))
+      const pending = view.missingFields
+      const placed = new Set()
 
-      const group = (title, items) => '<fieldset><legend>' + title + '</legend>' + boxes(items) + '</fieldset>'
+      // Campo pendente sai da leitura e vira input no proprio grupo; `extra` sao campos que so aparecem pendentes.
+      // Rotulo do proprio grupo (no contexto, "Data de emissão" basta); fora dele, o FIELD_LABEL completo.
+      const inputs = (fields, labels = {}) => {
+        const here = fields.filter((name) => pending.includes(name))
+        here.forEach((name) => placed.add(name))
+        return here.length ? '<div class="grid form pendentes">' + here.map((name) => pendingField(name, f, labels[name])).join('') + '</div>' : ''
+      }
+      const labelsOf = (items) => Object.fromEntries(items.filter((i) => i.field).map((i) => [i.field, i.label]))
+      const shown = (items) => boxes(items.filter((i) => !pending.includes(i.field)))
+      const group = (title, items, extra = []) =>
+        '<fieldset><legend>' + title + '</legend>' + shown(items) + inputs([...items.map((i) => i.field).filter(Boolean), ...extra], labelsOf(items)) + '</fieldset>'
+      const withDigit = (v, digit) => (blank(v) ? 'Não informado' : v + (blank(digit) ? '' : '-' + digit))
 
-      // Documentos de identificacao da conta (PF: RG ou CNH): so se escolhe um, nunca se edita. Abre no gravado na proposta, se houver.
-      const docs = view.documents || []
+      // Documentos de identificacao da conta (PF: RG ou CNH): so se escolhe um. Sem a lista, vale o que o backend gravou.
+      const docs = view.documents && view.documents.length
+        ? view.documents
+        : f.documentNumber ? [Object.fromEntries(DOCUMENT_FIELDS.map((field) => [field, f[field]]))] : []
       const saved = docs.findIndex((d) => d.documentType === f.documentType && d.documentNumber === f.documentNumber)
       let doc = docs[Math.max(saved, 0)]
-      const docBoxes = (d) => boxes([
-        { label: 'Tipo de documento', value: val(d && d.documentType) },
-        { label: 'Número do documento', value: val(d && d.documentNumber) },
-        { label: 'UF emissora', value: val(d && d.documentState) },
-        { label: 'Órgão emissor', value: val(d && d.documentIssuer) },
-        { label: 'Data de emissão', value: d && d.documentIssueDate ? formatDate(d.documentIssueDate) : 'Não informado' },
-      ])
+      const docItems = (d) => [
+        { field: 'documentType', label: 'Tipo de documento', value: val(d && d.documentType) },
+        { field: 'documentNumber', label: 'Número do documento', value: val(d && d.documentNumber) },
+        { field: 'documentState', label: 'UF emissora', value: val(d && d.documentState) },
+        { field: 'documentIssuer', label: 'Órgão emissor', value: val(d && d.documentIssuer) },
+        { field: 'documentIssueDate', label: 'Data de emissão', value: d && d.documentIssueDate ? formatDate(d.documentIssueDate) : 'Não informado' },
+      ]
+      const docBoxes = (d) => shown(docItems(d))
 
-      app.innerHTML =
+      const html =
         '<div class="card">' +
         '<h1>Confirme seus dados</h1>' +
-        '<p class="hint">Estes dados vêm do cadastro da empresa e do seu cadastro no app. Não podem ser alterados aqui: se algo estiver errado, fale com o RH ou atualize seu cadastro no app.</p>' +
-        (pending.length ? '<div class="aviso erro">Ainda faltam no seu cadastro: ' + esc(pending.map((c) => FIELD_LABEL[c] || c).join(', ')) + '. Atualize no app para enviar a proposta.</div>' : '') +
+        '<p class="hint">Estes dados vêm do cadastro da empresa e do seu cadastro no app. Não podem ser alterados aqui: se algo estiver errado, fale com o RH ou atualize seu cadastro no app.' +
+        (pending.length ? ' Complete só os campos marcados com <span class="req">*</span>.' : '') + '</p>' +
         group('Seus dados', [
           { label: 'Nome', value: val(k.name), wide: true },
           { label: 'Empresa', value: val(k.employer), wide: true },
-          { label: 'Sexo', value: val(SEX_LABEL[k.sex || f.sex]) },
+          { field: 'sex', label: 'Sexo', value: val(SEX_LABEL[k.sex || f.sex]) },
           { label: 'Nascimento', value: formatDate(k.birthDate) },
           { label: 'Matrícula', value: val(k.employeeNumber) },
           { label: 'Admissão', value: formatDate(k.hireDate) },
           { label: 'Salário', value: brl(k.salary) },
-          { label: 'Telefone', value: k.phone ? formatPhone(k.phone) : 'Não informado' },
-          { label: 'Endereço', value: addressText(k) || 'Não informado', wide: true },
-          { label: 'Dados bancários', value: bankText(k) || 'Não informado', wide: true },
+          { field: 'correctedPhone', label: 'Telefone', value: k.phone ? formatPhone(k.phone) : 'Não informado' },
         ]) +
         group('Dados pessoais', [
-          { label: 'Nacionalidade', value: val(NATIONALITY_LABEL[f.nationality]) },
-          { label: 'Nome da mãe', value: val(f.motherName) },
-          { label: 'Estado civil', value: val(MARITAL_STATUS_LABEL[f.maritalStatus]) },
-          { label: 'Pessoa politicamente exposta (PEP)', value: typeof f.pep === 'boolean' ? (f.pep ? 'Sim' : 'Não') : 'Não informado' },
+          { field: 'nationality', label: 'Nacionalidade', value: val(NATIONALITY_LABEL[f.nationality]) },
+          { field: 'motherName', label: 'Nome da mãe', value: val(f.motherName) },
+          { field: 'maritalStatus', label: 'Estado civil', value: val(MARITAL_STATUS_LABEL[f.maritalStatus]) },
+          { field: 'pep', label: 'Pessoa politicamente exposta (PEP)', value: typeof f.pep === 'boolean' ? (f.pep ? 'Sim' : 'Não') : 'Não informado' },
         ]) +
         '<fieldset><legend>Documento de identificação</legend>' +
         (docs.length
@@ -2809,18 +2850,31 @@
             docs.map((d, i) => '<option value="' + i + '"' + (d === doc ? ' selected' : '') + '>' + esc(d.documentType + ' ' + d.documentNumber) + '</option>').join('') +
             '</select></div></div>'
           : '<p class="hint">Nenhum documento de identificação (RG ou CNH) cadastrado no app.</p>') +
-        '<div id="doc-detalhe">' + docBoxes(doc) + '</div></fieldset>' +
+        '<div id="doc-detalhe">' + docBoxes(doc) + '</div>' + inputs(DOCUMENT_FIELDS, labelsOf(docItems(doc))) + '</fieldset>' +
         group('Endereço', [
-          { label: 'Cidade', value: val(f.city) },
-          { label: 'UF', value: val(f.state) },
-          { label: 'Bairro', value: val(f.district) },
+          { field: 'correctedPostalCode', label: 'CEP', value: (f.correctedPostalCode || k.postalCode) ? formatPostalCode(f.correctedPostalCode || k.postalCode) : 'Não informado' },
+          { field: 'correctedStreet', label: 'Rua', value: val(f.correctedStreet || k.street), wide: true },
+          { field: 'correctedStreetNumber', label: 'Número', value: val(f.correctedStreetNumber || k.streetNumber) },
+          { field: 'district', label: 'Bairro', value: val(f.district) },
+          { field: 'city', label: 'Cidade', value: val(f.city) },
+          { field: 'state', label: 'UF', value: val(f.state) },
         ]) +
+        group('Conta para crédito', [
+          { field: 'correctedBankCode', label: 'Banco', value: val(f.correctedBankCode || k.bankCode) },
+          { field: 'correctedBankBranch', label: 'Agência', value: withDigit(f.correctedBankBranch || k.bankBranch, f.branchCheckDigit) },
+          { field: 'correctedBankAccount', label: 'Conta', value: withDigit(f.correctedBankAccount || k.bankAccount, f.accountCheckDigit) },
+        ], ['branchCheckDigit', 'accountCheckDigit']) +
+        // Rede de seguranca: campo pendente novo, sem grupo, nao pode sumir da tela.
+        (pending.some((name) => !placed.has(name))
+          ? '<fieldset><legend>Outros dados</legend>' + inputs(pending.filter((name) => !placed.has(name))) + '</fieldset>'
+          : '') +
         '<fieldset><legend>Renda</legend><div class="grid form">' +
         formField('otherIncome', 'Renda mensal adicional (R$), opcional', textInput('otherIncome', f.otherIncome, ' inputmode="decimal"')) +
         '</div></fieldset>' +
         alertBox('erro-dados') +
         '<button class="acao" type="button" id="btn-dados">Continuar</button>' +
         '</div>'
+      app.innerHTML = html
 
       const picker = document.getElementById('documento')
       if (picker) {
@@ -2830,12 +2884,17 @@
         }
       }
 
+      // Vazio fica de fora: o `buildSupplementPayload` omite e o que veio da conta nao e apagado.
+      const typedPending = () => Object.fromEntries(
+        [...document.querySelectorAll('.pendentes [name]')].filter((el) => el.value.trim() !== '').map((el) => [el.name, el.value.trim()]),
+      )
+
       // Continuar so grava: o envio a Funcao sai da tela seguinte, por clique explicito.
       document.getElementById('btn-dados').onclick = (ev) => withButton(ev.currentTarget, 'Salvando…', async () => {
         clearError('erro-dados')
         const id = S.proposalId
         try {
-          const r = await api('PATCH', '/proposals/' + id + '/customer-data', buildSupplementPayload(supplementValues(f, document.getElementById('otherIncome').value, doc)))
+          const r = await api('PATCH', '/proposals/' + id + '/customer-data', buildSupplementPayload(supplementValues(f, document.getElementById('otherIncome').value, doc, typedPending())))
           if (!r.complete) {
             if (isCurrent()) showError('erro-dados', 'Faltam no seu cadastro: ' + r.missingFields.map((c) => FIELD_LABEL[c] || c).join(', ') + '.')
             return
@@ -3678,7 +3737,11 @@
         '<div class="card"><h2>Resultado da transação</h2>' +
         '<form id="form-af-tx" class="linha" style="margin-bottom:10px">' + input('af-tx', 'ID da transação', ' required') +
         '<button class="acao" style="flex:0 0 120px">Consultar</button></form>' +
-        '<div id="res-af"></div></div>'
+        '<div id="res-af"></div></div>' +
+        '<div class="card"><h2>Dados básicos PF (Receita)</h2><p class="hint">Serviço <code>pf_basic_data</code> da CAF, pelo mesmo client da Certta. <strong>Cobrada.</strong> Nada é gravado nem logado.</p>' +
+        '<form id="form-af-pf" class="linha" style="margin-bottom:10px">' + input('af-pf-cpf', 'CPF', ' required inputmode="numeric"') +
+        '<button class="acao" style="flex:0 0 160px">Consultar (cobrada)</button></form>' +
+        '<div id="res-af-pf"></div></div>'
 
       const val = (id) => document.getElementById(id).value.trim()
       const target = document.getElementById('res-af')
@@ -3739,6 +3802,18 @@
         return lookup(transactionId)
       })
       submit('form-af-tx', () => lookup(val('af-tx')))
+      document.getElementById('form-af-pf').onsubmit = async (ev) => {
+        ev.preventDefault()
+        clearError('erro-antifraude')
+        const out = document.getElementById('res-af-pf')
+        out.innerHTML = '<p class="hint">Consultando…</p>'
+        try {
+          const r = await api('POST', '/admin/antifraud/services/pf-basic-data', { cpf: val('af-pf-cpf') })
+          if (isCurrent()) out.innerHTML = '<div class="af">' + value(r) + '<details><summary>JSON bruto</summary><pre>' + esc(JSON.stringify(r, null, 2)) + '</pre></details></div>'
+        } catch (err) {
+          if (isCurrent()) { out.innerHTML = ''; showError('erro-antifraude', err.message) }
+        }
+      }
       if (pendingAntifraudTx) {
         document.getElementById('af-tx').value = pendingAntifraudTx
         pendingAntifraudTx = null
