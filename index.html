@@ -2039,8 +2039,7 @@
       MISSING_ADMISSION_DATE: 'Sem data de admissão',
       AGREEMENT_BAND_MISSING: 'Sem convênio para o tempo de casa',
       NO_PUBLISHED_EMPLOYMENT_BATCH: 'Sem lote de vínculos publicado',
-      ORIGIN5_NOT_FOUND: 'Filial (Origem5) não cadastrada',
-      ORIGIN5_AMBIGUOUS: 'Mais de uma filial (Origem5) com o CNPJ',
+      ORIGIN5_NOT_FOUND: 'Filial (Origem5) configurada não cadastrada',
       ORIGIN4_INACTIVE: 'Empregador (Origem4) inativo na Função',
       ORIGIN3_NOT_FOUND: 'Origem3 do empregador não cadastrada na Função',
       ORIGIN_CATALOG_UNAVAILABLE: 'Catálogo de origens da Função indisponível',
@@ -4031,6 +4030,7 @@
         '<h1>Configurações</h1>' +
         alertBox('erro-config') +
         '<p class="hint" id="config-atualizado">Origens lidas da Função.</p>' +
+        '<div class="linha" style="margin-bottom:16px"><input id="busca-origens" type="search" placeholder="Buscar por nome ou CNPJ" spellcheck="false" aria-label="Buscar origens por nome ou CNPJ"></div>' +
         '<h2>Empregadores (Origem 4)</h2>' +
         '<p class="hint">A Origem 4 identifica o empregador da venda. Esse código segue nas simulações e propostas. A tabela mostra a Origem 3 associada no catálogo da Função. Filiais de uma Origem 4 inativa não são liberadas.</p>' +
         '<div id="config-canais" class="hint">Carregando…</div>' +
@@ -4039,24 +4039,43 @@
         '<div id="config-filiais" class="hint">Carregando…</div>' +
         '</div>'
 
+      // Busca só na tela: o catálogo inteiro já vem nas duas rotas. CNPJ compara só letras e dígitos
+      // (a Função já devolve CNPJ alfanumérico); nome, sem acento nem caixa.
+      const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      const alnum = (v) => fold(v).replace(/[^a-z0-9]/g, '')
+      const matches = (term, name, cnpj) => {
+        const t = fold(term).trim()
+        if (!t) return true
+        const key = alnum(t)
+        return fold(name).includes(t) || (key !== '' && alnum(cnpj).includes(key))
+      }
+
       Promise.all([api('GET', '/admin/channels'), api('GET', '/admin/branches')]).then(([{ channels, refreshedAt }, { branches }]) => {
         if (!isCurrent()) return
         document.getElementById('config-atualizado').textContent =
           'Catálogo da Função, lido em ' + formatDateTime(refreshedAt) + ' e renovado a cada hora.'
-        document.getElementById('config-canais').innerHTML = channels.length
-          ? readOnlyTable('Empregadores e Origens 3 da Função', ['Código na Função', 'Descrição', 'Origem 3 associada', 'CNPJ', 'Situação'],
-            channels.map((c) => [
-              c.funcaoCode,
-              c.name,
-              c.origin3 && [c.origin3.funcaoCode, c.origin3.name].filter(Boolean).join(' · '),
-              c.cnpj,
-              c.active ? 'Ativo' : 'Inativo',
-            ]))
-          : 'Nenhum empregador na Função.'
-        document.getElementById('config-filiais').innerHTML = branches.length
-          ? readOnlyTable('Filiais e empregadores da Função', ['Código na Função', 'Descrição', 'CNPJ da filial', 'Empregador (Origem 4)'],
-            branches.map((f) => [f.funcaoCode, f.name, f.cnpj, f.channel && [f.channel.funcaoCode, f.channel.name].filter(Boolean).join(' · ')]))
-          : 'Nenhuma filial na Função.'
+        const render = (term) => {
+          const cs = channels.filter((c) => matches(term, c.name, c.cnpj))
+          const fs = branches.filter((f) => matches(term, f.name, f.cnpj))
+          const searching = term.trim() !== ''
+          document.getElementById('config-canais').innerHTML = cs.length
+            ? readOnlyTable('Empregadores e Origens 3 da Função', ['Código na Função', 'Descrição', 'Origem 3 associada', 'CNPJ', 'Situação'],
+              cs.map((c) => [
+                c.funcaoCode,
+                c.name,
+                c.origin3 && [c.origin3.funcaoCode, c.origin3.name].filter(Boolean).join(' · '),
+                c.cnpj,
+                c.active ? 'Ativo' : 'Inativo',
+              ]))
+            : searching ? 'Nenhum empregador encontrado.' : 'Nenhum empregador na Função.'
+          document.getElementById('config-filiais').innerHTML = fs.length
+            ? readOnlyTable('Filiais e empregadores da Função', ['Código na Função', 'Descrição', 'CNPJ da filial', 'Empregador (Origem 4)'],
+              fs.map((f) => [f.funcaoCode, f.name, f.cnpj, f.channel && [f.channel.funcaoCode, f.channel.name].filter(Boolean).join(' · ')]))
+            : searching ? 'Nenhuma filial encontrada.' : 'Nenhuma filial na Função.'
+        }
+        const input = document.getElementById('busca-origens')
+        input.oninput = () => render(input.value)
+        render(input.value)
       }).catch((err) => { if (isCurrent()) showError('erro-config', err.message) })
     }
 
